@@ -1,0 +1,22 @@
+# Godot
+.godot/
+
+# Local bulk Kenney archive (kept on disk, not for git — too large)
+assets/Kenney/
+
+# Export / build outputs
+build/
+*.exe
+*.pck
+*.zip
+*.tpz
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.tmp
+*~
+
+# Logs
+*_log.txt
+export_log.txt

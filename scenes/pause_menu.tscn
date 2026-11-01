@@ -1,0 +1,68 @@
+[gd_scene load_steps=3 format=3 uid="uid://bpausemenuforest"]
+
+[ext_resource type="Script" path="res://scripts/pause_menu.gd" id="1_pause"]
+[ext_resource type="PackedScene" path="res://scenes/settings_panel.tscn" id="2_settings"]
+
+[node name="PauseMenu" type="CanvasLayer"]
+layer = 100
+script = ExtResource("1_pause")
+
+[node name="Dim" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0.02, 0.04, 0.03, 0.72)
+
+[node name="Center" type="CenterContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(520, 0)
+mouse_filter = 0
+
+[node name="Margin" type="MarginContainer" parent="Center/Panel"]
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 24
+
+[node name="VBox" type="VBoxContainer" parent="Center/Panel/Margin"]
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="Center/Panel/Margin/VBox"]
+theme_override_font_sizes/font_size = 28
+text = "暂停菜单"
+horizontal_alignment = 1
+
+[node name="Hint" type="Label" parent="Center/Panel/Margin/VBox"]
+modulate = Color(0.75, 0.8, 0.75, 1)
+text = "按 Esc 继续游戏"
+horizontal_alignment = 1
+
+[node name="MainActions" type="VBoxContainer" parent="Center/Panel/Margin/VBox"]
+theme_override_constants/separation = 12
+
+[node name="ResumeButton" type="Button" parent="Center/Panel/Margin/VBox/MainActions"]
+custom_minimum_size = Vector2(0, 42)
+text = "继续游戏"
+
+[node name="SettingsButton" type="Button" parent="Center/Panel/Margin/VBox/MainActions"]
+custom_minimum_size = Vector2(0, 42)
+text = "设置"
+
+[node name="MenuButton" type="Button" parent="Center/Panel/Margin/VBox/MainActions"]
+custom_minimum_size = Vector2(0, 42)
+text = "返回主菜单"
+
+[node name="SettingsHost" type="MarginContainer" parent="Center/Panel/Margin/VBox"]
+visible = false
+
+[node name="SettingsPanel" parent="Center/Panel/Margin/VBox/SettingsHost" instance=ExtResource("2_settings")]

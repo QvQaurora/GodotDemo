@@ -1,0 +1,97 @@
+[gd_scene load_steps=2 format=3 uid="uid://csettingspanelforest"]
+
+[ext_resource type="Script" path="res://scripts/settings_panel.gd" id="1_settings"]
+
+[node name="SettingsPanel" type="VBoxContainer"]
+custom_minimum_size = Vector2(480, 420)
+theme_override_constants/separation = 12
+script = ExtResource("1_settings")
+
+[node name="Title" type="Label" parent="."]
+theme_override_font_sizes/font_size = 26
+text = "设置"
+horizontal_alignment = 1
+
+[node name="Tabs" type="TabContainer" parent="."]
+size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 320)
+
+[node name="画质" type="ScrollContainer" parent="Tabs"]
+custom_minimum_size = Vector2(0, 300)
+horizontal_scroll_mode = 0
+
+[node name="GraphicsList" type="VBoxContainer" parent="Tabs/画质"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="声音" type="VBoxContainer" parent="Tabs"]
+theme_override_constants/separation = 12
+
+[node name="MasterRow" type="HBoxContainer" parent="Tabs/声音"]
+theme_override_constants/separation = 12
+
+[node name="MasterName" type="Label" parent="Tabs/声音/MasterRow"]
+custom_minimum_size = Vector2(90, 0)
+text = "主音量"
+
+[node name="MasterSlider" type="HSlider" parent="Tabs/声音/MasterRow"]
+size_flags_horizontal = 3
+size_flags_vertical = 1
+max_value = 100.0
+step = 1.0
+value = 80.0
+
+[node name="MasterValue" type="Label" parent="Tabs/声音/MasterRow"]
+custom_minimum_size = Vector2(48, 0)
+text = "80%"
+horizontal_alignment = 2
+
+[node name="MusicRow" type="HBoxContainer" parent="Tabs/声音"]
+theme_override_constants/separation = 12
+
+[node name="MusicName" type="Label" parent="Tabs/声音/MusicRow"]
+custom_minimum_size = Vector2(90, 0)
+text = "环境音"
+
+[node name="MusicSlider" type="HSlider" parent="Tabs/声音/MusicRow"]
+size_flags_horizontal = 3
+size_flags_vertical = 1
+max_value = 100.0
+step = 1.0
+value = 60.0
+
+[node name="MusicValue" type="Label" parent="Tabs/声音/MusicRow"]
+custom_minimum_size = Vector2(48, 0)
+text = "60%"
+horizontal_alignment = 2
+
+[node name="SfxRow" type="HBoxContainer" parent="Tabs/声音"]
+theme_override_constants/separation = 12
+
+[node name="SfxName" type="Label" parent="Tabs/声音/SfxRow"]
+custom_minimum_size = Vector2(90, 0)
+text = "音效"
+
+[node name="SfxSlider" type="HSlider" parent="Tabs/声音/SfxRow"]
+size_flags_horizontal = 3
+size_flags_vertical = 1
+max_value = 100.0
+step = 1.0
+value = 80.0
+
+[node name="SfxValue" type="Label" parent="Tabs/声音/SfxRow"]
+custom_minimum_size = Vector2(48, 0)
+text = "80%"
+horizontal_alignment = 2
+
+[node name="AudioHint" type="Label" parent="Tabs/声音"]
+modulate = Color(0.7, 0.78, 0.7, 1)
+autowrap_mode = 3
+text = "音效轨道预留给脚步、UI 等，当前场景主要使用环境音。"
+
+[node name="Buttons" type="HBoxContainer" parent="."]
+alignment = 1
+
+[node name="BackButton" type="Button" parent="Buttons"]
+custom_minimum_size = Vector2(160, 40)
+text = "返回"
