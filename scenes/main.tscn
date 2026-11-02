@@ -1,10 +1,9 @@
-[gd_scene load_steps=11 format=3 uid="uid://bforest1000main"]
+[gd_scene load_steps=10 format=3 uid="uid://bforest1000main"]
 
 [ext_resource type="Script" path="res://scripts/forest_generator.gd" id="1_forest"]
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="2_player"]
 [ext_resource type="PackedScene" path="res://scenes/pause_menu.tscn" id="3_pause"]
 [ext_resource type="Script" path="res://scripts/game_world.gd" id="4_world"]
-[ext_resource type="PackedScene" path="res://scenes/motion_blur_overlay.tscn" id="5_blur"]
 [ext_resource type="PackedScene" path="res://scenes/inventory.tscn" id="6_inv"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
@@ -33,10 +32,7 @@ fog_density = 0.0009
 fog_aerial_perspective = 0.35
 
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_main"]
-dof_blur_far_enabled = true
-dof_blur_far_distance = 280.0
-dof_blur_far_transition = 160.0
-dof_blur_amount = 0.05
+dof_blur_far_enabled = false
 
 [node name="Main" type="Node3D"]
 script = ExtResource("4_world")
@@ -79,8 +75,6 @@ ground_normal_scale = 0.9
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.0, 0)
-
-[node name="MotionBlurOverlay" parent="." instance=ExtResource("5_blur")]
 
 [node name="Inventory" parent="." instance=ExtResource("6_inv")]
 

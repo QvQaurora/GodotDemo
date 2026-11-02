@@ -87,7 +87,7 @@ horizontal_alignment = 2
 [node name="AudioHint" type="Label" parent="Tabs/声音"]
 modulate = Color(0.7, 0.78, 0.7, 1)
 autowrap_mode = 3
-text = "音效轨道预留给脚步、UI 等，当前场景主要使用环境音。"
+text = "音效轨道已预留，当前场景主要使用环境音。"
 
 [node name="Buttons" type="HBoxContainer" parent="."]
 alignment = 1

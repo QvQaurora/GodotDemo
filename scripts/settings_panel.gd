@@ -14,22 +14,16 @@ signal back_pressed
 @onready var back_btn: Button = $Buttons/BackButton
 
 var _preset: OptionButton
-var _window: OptionButton
+var _windowed: CheckButton
+var _resolution: OptionButton
+var _resolution_row: HBoxContainer
 var _vsync: OptionButton
 var _fps: OptionButton
-var _scale: HSlider
-var _scale_value: Label
-var _msaa: OptionButton
-var _fxaa: CheckButton
-var _taa: CheckButton
+var _aa: OptionButton
 var _shadows: OptionButton
-var _shadow_dist: HSlider
-var _shadow_dist_value: Label
 var _ssao: CheckButton
 var _glow: CheckButton
 var _fog: CheckButton
-var _dof: CheckButton
-var _motion_blur: OptionButton
 var _syncing: bool = false
 
 
@@ -60,10 +54,20 @@ func _build_graphics_rows() -> void:
 	)
 	_preset.item_selected.connect(_on_preset_selected)
 
-	_window = _add_option_row("窗口模式", ["窗口", "无边框最大化", "无边框最大化"], [0, 1, 2])
-	_window.item_selected.connect(func(i: int) -> void:
-		_set_graphic("window_mode", _window.get_item_id(i))
-	)
+	_windowed = _add_check_row("窗口模式")
+	_windowed.toggled.connect(_on_windowed_toggled)
+
+	_resolution_row = HBoxContainer.new()
+	_resolution_row.add_theme_constant_override("separation", 12)
+	var res_label := Label.new()
+	res_label.custom_minimum_size = Vector2(140, 0)
+	res_label.text = "分辨率"
+	_resolution_row.add_child(res_label)
+	_resolution = OptionButton.new()
+	_resolution.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_resolution_row.add_child(_resolution)
+	graphics_list.add_child(_resolution_row)
+	_resolution.item_selected.connect(_on_resolution_selected)
 
 	_vsync = _add_option_row("垂直同步", ["关闭", "开启", "自适应", "Mailbox"], [0, 1, 2, 3])
 	_vsync.item_selected.connect(func(i: int) -> void:
@@ -75,36 +79,26 @@ func _build_graphics_rows() -> void:
 		_set_graphic("max_fps", _fps.get_item_id(i))
 	)
 
-	var scale_row := _add_slider_row("渲染比例", 50.0, 100.0, 5.0)
-	_scale = scale_row[0]
-	_scale_value = scale_row[1]
-	_scale.value_changed.connect(func(v: float) -> void:
-		_scale_value.text = "%d%%" % int(v)
-		_set_graphic("render_scale", v / 100.0)
+	# Display order: non-MSAA first, MSAA last (IDs stay stable for saves).
+	_aa = _add_option_row(
+		"抗锯齿",
+		["关闭", "FXAA", "TAA", "MSAA 2x", "MSAA 4x", "MSAA 8x"],
+		[
+			GameSettings.AntiAliasing.OFF,
+			GameSettings.AntiAliasing.FXAA,
+			GameSettings.AntiAliasing.TAA,
+			GameSettings.AntiAliasing.MSAA_2X,
+			GameSettings.AntiAliasing.MSAA_4X,
+			GameSettings.AntiAliasing.MSAA_8X,
+		]
 	)
-
-	_msaa = _add_option_row("MSAA 抗锯齿", ["关闭", "2x", "4x", "8x"], [0, 1, 2, 3])
-	_msaa.item_selected.connect(func(i: int) -> void:
-		_set_graphic("msaa", _msaa.get_item_id(i))
+	_aa.item_selected.connect(func(i: int) -> void:
+		_set_graphic("anti_aliasing", _aa.get_item_id(i))
 	)
-
-	_fxaa = _add_check_row("FXAA")
-	_fxaa.toggled.connect(func(on: bool) -> void: _set_graphic("fxaa", on))
-
-	_taa = _add_check_row("TAA 时间抗锯齿")
-	_taa.toggled.connect(func(on: bool) -> void: _set_graphic("taa", on))
 
 	_shadows = _add_option_row("阴影质量", ["关闭", "低", "中", "高"], [0, 1, 2, 3])
 	_shadows.item_selected.connect(func(i: int) -> void:
 		_set_graphic("shadow_quality", _shadows.get_item_id(i))
-	)
-
-	var dist_row := _add_slider_row("阴影距离", 80.0, 500.0, 10.0)
-	_shadow_dist = dist_row[0]
-	_shadow_dist_value = dist_row[1]
-	_shadow_dist.value_changed.connect(func(v: float) -> void:
-		_shadow_dist_value.text = "%dm" % int(v)
-		_set_graphic("shadow_distance", v)
 	)
 
 	_ssao = _add_check_row("环境光遮蔽 (SSAO)")
@@ -115,14 +109,6 @@ func _build_graphics_rows() -> void:
 
 	_fog = _add_check_row("雾效")
 	_fog.toggled.connect(func(on: bool) -> void: _set_graphic("fog", on))
-
-	_dof = _add_check_row("景深")
-	_dof.toggled.connect(func(on: bool) -> void: _set_graphic("dof", on))
-
-	_motion_blur = _add_option_row("动态模糊", ["关闭", "低", "中", "高"], [0, 1, 2, 3])
-	_motion_blur.item_selected.connect(func(i: int) -> void:
-		_set_graphic("motion_blur", _motion_blur.get_item_id(i))
-	)
 
 
 func _add_option_row(label_text: String, items: Array, ids: Array) -> OptionButton:
@@ -155,53 +141,51 @@ func _add_check_row(label_text: String) -> CheckButton:
 	return check
 
 
-func _add_slider_row(label_text: String, min_v: float, max_v: float, step: float) -> Array:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 12)
-	var label := Label.new()
-	label.custom_minimum_size = Vector2(140, 0)
-	label.text = label_text
-	row.add_child(label)
-	var slider := HSlider.new()
-	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	slider.size_flags_vertical = Control.SIZE_FILL
-	slider.min_value = min_v
-	slider.max_value = max_v
-	slider.step = step
-	row.add_child(slider)
-	var value := Label.new()
-	value.custom_minimum_size = Vector2(56, 0)
-	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	row.add_child(value)
-	graphics_list.add_child(row)
-	return [slider, value]
-
-
 func sync_from_settings() -> void:
 	_syncing = true
 	_select_by_id(_preset, GameSettings.quality)
-	_select_by_id(_window, GameSettings.window_mode)
+	_windowed.set_pressed_no_signal(GameSettings.windowed)
+	_rebuild_resolution_options()
 	_select_by_id(_vsync, GameSettings.vsync_mode)
 	_select_by_id(_fps, GameSettings.max_fps)
-	_scale.set_value_no_signal(GameSettings.render_scale * 100.0)
-	_scale_value.text = "%d%%" % int(_scale.value)
-	_select_by_id(_msaa, GameSettings.msaa)
-	_fxaa.set_pressed_no_signal(GameSettings.fxaa)
-	_taa.set_pressed_no_signal(GameSettings.taa)
+	_select_by_id(_aa, GameSettings.anti_aliasing)
 	_select_by_id(_shadows, GameSettings.shadow_quality)
-	_shadow_dist.set_value_no_signal(GameSettings.shadow_distance)
-	_shadow_dist_value.text = "%dm" % int(_shadow_dist.value)
 	_ssao.set_pressed_no_signal(GameSettings.ssao)
 	_glow.set_pressed_no_signal(GameSettings.glow)
 	_fog.set_pressed_no_signal(GameSettings.fog)
-	_dof.set_pressed_no_signal(GameSettings.dof)
-	_select_by_id(_motion_blur, GameSettings.motion_blur)
+	_update_resolution_enabled()
 
 	master_slider.set_value_no_signal(GameSettings.master_volume * 100.0)
 	music_slider.set_value_no_signal(GameSettings.music_volume * 100.0)
 	sfx_slider.set_value_no_signal(GameSettings.sfx_volume * 100.0)
 	_update_audio_labels()
 	_syncing = false
+
+
+func _rebuild_resolution_options() -> void:
+	if _resolution == null:
+		return
+	_resolution.clear()
+	var resolutions := GameSettings.available_resolutions()
+	for i in resolutions.size():
+		var res: Vector2i = resolutions[i]
+		_resolution.add_item("%d × %d" % [res.x, res.y], i)
+		_resolution.set_item_metadata(i, res)
+	for i in _resolution.item_count:
+		var res: Vector2i = _resolution.get_item_metadata(i)
+		if res == GameSettings.window_resolution:
+			_resolution.select(i)
+			return
+	if _resolution.item_count > 0:
+		_resolution.select(0)
+
+
+func _update_resolution_enabled() -> void:
+	var on := GameSettings.windowed
+	if _resolution_row != null:
+		_resolution_row.visible = on
+	if _resolution != null:
+		_resolution.disabled = not on
 
 
 func _select_by_id(opt: OptionButton, id: int) -> void:
@@ -221,6 +205,28 @@ func _set_graphic(property: String, value: Variant) -> void:
 	if property != "quality":
 		GameSettings.mark_custom()
 		_select_by_id(_preset, GameSettings.Quality.CUSTOM)
+	GameSettings.apply_graphics()
+	GameSettings.save_settings()
+
+
+func _on_windowed_toggled(on: bool) -> void:
+	if _syncing:
+		return
+	GameSettings.windowed = on
+	GameSettings.mark_custom()
+	_select_by_id(_preset, GameSettings.Quality.CUSTOM)
+	_update_resolution_enabled()
+	GameSettings.apply_graphics()
+	GameSettings.save_settings()
+
+
+func _on_resolution_selected(index: int) -> void:
+	if _syncing or not GameSettings.windowed:
+		return
+	var res: Vector2i = _resolution.get_item_metadata(index)
+	GameSettings.window_resolution = res
+	GameSettings.mark_custom()
+	_select_by_id(_preset, GameSettings.Quality.CUSTOM)
 	GameSettings.apply_graphics()
 	GameSettings.save_settings()
 

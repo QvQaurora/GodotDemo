@@ -622,7 +622,7 @@ func _setup_road_paths() -> void:
 
 
 func _is_road_junction_node(p: Vector3) -> bool:
-	# True intersections stay sharp so lights/zebras can align to real arms.
+	# True intersections stay sharp so traffic lights can align to real arms.
 	for hub in _road_intersection_hubs():
 		if Vector2(p.x - hub.x, p.z - hub.z).length() < 0.75:
 			return true
@@ -763,16 +763,9 @@ func _road_intersection_hubs() -> Array[Vector3]:
 	]
 
 
-func _zebra_band_half_length() -> float:
-	const STRIPES := 7
-	const STRIPE_W := 0.55
-	const STRIPE_GAP := 0.4
-	return (float(STRIPES) * STRIPE_W + float(STRIPES - 1) * STRIPE_GAP) * 0.5
-
-
 func _near_crossing(x: float, z: float, radius: float) -> bool:
-	# Keep center dashes clear of the junction box + zebra band on each arm.
-	var clear := radius + _zebra_band_half_length() + road_width * 0.75 + 3.5
+	# Keep center dashes clear of the junction box.
+	var clear := radius + road_width * 0.75 + 3.5
 	for hub in _road_intersection_hubs():
 		if Vector2(x - hub.x, z - hub.z).length() < clear:
 			return true
@@ -805,7 +798,7 @@ func _path_closest_arc_s(path: Array, hub: Vector3) -> Dictionary:
 func _intersection_approaches(hub: Vector3) -> Array[Dictionary]:
 	# One entry per road arm: centerline stop-line + inbound tangent (toward hub).
 	var hub2 := Vector2(hub.x, hub.z)
-	var stop_r := road_width * 0.5 + _zebra_band_half_length() + 4.0
+	var stop_r := road_width * 0.5 + 4.0
 	var approaches: Array[Dictionary] = []
 	for path in _road_paths:
 		var total := _path_total_length(path)
@@ -852,7 +845,7 @@ func _intersection_approaches(hub: Vector3) -> Array[Dictionary]:
 
 
 func _build_road_markings() -> void:
-	# Thin height-sampled decals: yellow dashed center line + white zebra crossings.
+	# Thin height-sampled decals: yellow dashed center line.
 	var root := Node3D.new()
 	root.name = "RoadMarkings"
 	add_child(root)
@@ -860,9 +853,6 @@ func _build_road_markings() -> void:
 	var dash_mat := _make_mat(Color(0.95, 0.90, 0.35), 0.72)
 	dash_mat.grow = true
 	dash_mat.grow_amount = 0.012
-	var zebra_mat := _make_mat(Color(0.93, 0.93, 0.95), 0.68)
-	zebra_mat.grow = true
-	zebra_mat.grow_amount = 0.012
 
 	const DASH_LEN := 3.2
 	const DASH_GAP := 4.2
@@ -905,42 +895,6 @@ func _build_road_markings() -> void:
 			dash.position = Vector3(mid_xz.x, hm + LIFT, mid_xz.y)
 			dash.rotation = Vector3(pitch, yaw, 0.0)
 			root.add_child(dash)
-
-	# One zebra per approach, on the centerline, stripes across the lane.
-	for hub in _road_intersection_hubs():
-		for approach in _intersection_approaches(hub):
-			var pos: Vector2 = approach["pos"]
-			var along: Vector2 = approach["along"]
-			_place_zebra_crossing(root, Vector3(pos.x, 0.0, pos.y), along, zebra_mat, LIFT)
-
-
-func _place_zebra_crossing(root: Node3D, site: Vector3, along: Vector2, mat: Material, lift: float) -> void:
-	if along.length_squared() < 0.01:
-		along = Vector2(0.0, 1.0)
-	else:
-		along = along.normalized()
-	# Local +Z follows along; local +X is across the road.
-	var yaw := atan2(along.x, along.y)
-	const STRIPES := 7
-	const STRIPE_W := 0.55 # along road
-	const STRIPE_GAP := 0.4
-	var stripe_len := road_width * 0.78
-	var span := float(STRIPES) * STRIPE_W + float(STRIPES - 1) * STRIPE_GAP
-	var start := -span * 0.5 + STRIPE_W * 0.5
-	var mid_h := _height_at(site.x, site.z)
-	for i in STRIPES:
-		var along_off := start + float(i) * (STRIPE_W + STRIPE_GAP)
-		var xz := Vector2(site.x, site.z) + along * along_off
-		# Flat band height from stop-line center — per-stripe height made stripes stair-step.
-		var stripe := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = Vector3(stripe_len, 0.02, STRIPE_W)
-		stripe.mesh = box
-		stripe.material_override = mat
-		stripe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		stripe.position = Vector3(xz.x, mid_h + lift, xz.y)
-		stripe.rotation = Vector3(0.0, yaw, 0.0)
-		root.add_child(stripe)
 
 
 func _build_traffic_lights() -> void:
