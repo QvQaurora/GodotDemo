@@ -24,6 +24,14 @@ horizontal_scroll_mode = 0
 size_flags_horizontal = 3
 theme_override_constants/separation = 10
 
+[node name="键位" type="ScrollContainer" parent="Tabs"]
+custom_minimum_size = Vector2(0, 300)
+horizontal_scroll_mode = 0
+
+[node name="KeybindList" type="VBoxContainer" parent="Tabs/键位"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
 [node name="声音" type="VBoxContainer" parent="Tabs"]
 theme_override_constants/separation = 12
 
@@ -90,8 +98,28 @@ autowrap_mode = 3
 text = "音效轨道已预留，当前场景主要使用环境音。"
 
 [node name="Buttons" type="HBoxContainer" parent="."]
+theme_override_constants/separation = 12
 alignment = 1
 
+[node name="ResumeButton" type="Button" parent="Buttons"]
+visible = false
+custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
+text = "继续游戏"
+
+[node name="SaveButton" type="Button" parent="Buttons"]
+visible = false
+custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
+text = "存档"
+
+[node name="MenuButton" type="Button" parent="Buttons"]
+visible = false
+custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
+text = "返回主菜单"
+
 [node name="BackButton" type="Button" parent="Buttons"]
-custom_minimum_size = Vector2(160, 40)
+custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
 text = "返回"

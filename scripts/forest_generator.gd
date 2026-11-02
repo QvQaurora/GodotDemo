@@ -1,8 +1,13 @@
 extends Node3D
-## Builds a 1000×1000 m forest world from Kenney assets + procedural terrain/roads.
+## Builds a 1000x1000 m forest world from Kenney assets + procedural terrain/roads.
+
+const _TerrainCache = preload("res://scripts/terrain_cache.gd")
+const _PlacementCache = preload("res://scripts/placement_cache.gd")
+const _BakedCacheSeed = preload("res://scripts/baked_cache_seed.gd")
 
 @export var terrain_size: float = 1000.0
-@export var tree_count: int = 1400
+@export var tree_count: int = 2400
+@export var tree_min_spacing: float = 7.5 ## min distance between tree trunks (avoids canopy clip)
 @export var seed_value: int = 42
 @export var pond_count: int = 14
 @export var road_width: float = 10.0
@@ -11,45 +16,98 @@ extends Node3D
 @export var bump_height: float = 1.8 ## soft mid-scale rolls (not sharp ridges)
 @export var micro_bump_height: float = 0.2 ## fine ground ripple
 @export var height_smooth_passes: int = 3 ## blur passes → arc-like slopes instead of faceted planes
-@export var grass_count: int = 10000
+@export var mountain_count: int = 8
+@export var mountain_height: float = 48.0 ## peak raise above base hills
+@export var mountain_radius: float = 95.0 ## footprint radius of each peak
+@export var grass_count: int = 10000 ## legacy; runtime uses grass_per_chunk
+@export var grass_per_chunk: int = 48 ## lazy grass density per near chunk
 @export var grass_tile_meters: float = 3.5 ## ground texture repeat size in meters
 @export var house_count: int = 18
 @export var animal_count: int = 140
 @export var monster_count: int = 55
 @export var ground_normal_scale: float = 0.9
+@export var treasure_count: int = 28
+@export var use_terrain_cache: bool = true
+@export var use_placement_cache: bool = true
+@export var chunk_size: float = 64.0
+@export var stream_visual_chunks: int = 5 ## ~5*64m Chebyshev nearby forest
+@export var stream_collision_chunks: int = 2
+@export var stream_grass_chunks: int = 3 ## grass only in this nearer ring
+@export var actor_stream_distance: float = 140.0
 
 ## Pond centers (xz) and radii, filled in _place_pond_data.
 var _ponds: Array[Vector3] = [] # (x, radius, z)
+## Collected pickup ids (persisted via save).
+var _collected_pickups: Dictionary = {} # id -> true
 ## Road polylines: each entry is a list of xz waypoints.
 var _road_paths: Array = []
 ## House footprints (x, radius, z) so trees/rocks avoid them.
 var _house_pads: Array[Vector3] = []
+## Actual building plan for map: {x,z,sx,sz,yaw} in world meters.
+var _house_map_footprints: Array = []
+## Mountain peaks for map (x, radius, z).
+var _mountain_peaks: Array[Vector3] = []
+## Cached once ? building every map open freezes the game.
+var _map_height_preview: Image
 ## Heightmap samples, row-major (z major outer, x inner).
 var _heights: PackedFloat32Array = PackedFloat32Array()
 ## Pre-flatten noise heights so roads follow the land instead of carving to y=0.
 var _natural_heights: PackedFloat32Array = PackedFloat32Array()
 var _height_res: int = 129
-## Hi-res road coverage mask (R asphalt, G curb, B shoulder) — smooth edges independent of terrain tris.
+## Hi-res road coverage mask (R asphalt, G curb, B shoulder).
 var _road_mask_tex: Texture2D
+var _streamer: Node = null
+var _sm_trees: Array[Mesh] = []
+var _sm_grass: Array[Mesh] = []
+var _sm_rocks: Array[Mesh] = []
+var _sm_rock_mats: Array[Material] = []
+var _sm_bushes: Array[Mesh] = []
+var _sm_flowers: Array[Mesh] = []
+var _grass_native_h: Array[float] = []
+var _map_treasure_markers: Array = []
+## Animals/monsters for the world map: {x,z,kind} kind 0=animal 1=monster.
+var _map_actor_markers: Array = []
+var _grass_filled_chunks: Dictionary = {} # Vector2i -> true
+## True after streaming data is prepared and first chunks are forced in.
+var world_ready: bool = false
+signal world_built
 
 
 func _ready() -> void:
 	add_to_group("forest_world")
+	world_ready = false
+	_BakedCacheSeed.seed_all()
+	if not GameSettings.settings_changed.is_connected(_on_settings_changed_stream):
+		GameSettings.settings_changed.connect(_on_settings_changed_stream)
 	# Build across frames so the window stays responsive (avoids "not responding").
 	await _build_world_async()
+
+
+func _on_settings_changed_stream() -> void:
+	# Single apply path (apply_graphics emits settings_changed ? avoid double force_update).
+	apply_streaming_budget(GameSettings.streaming_budget())
 
 
 func get_terrain_height(x: float, z: float) -> float:
 	return _height_at(x, z)
 
 
+func is_pickup_collected(pickup_id: String) -> bool:
+	return _collected_pickups.has(pickup_id)
+
+
 func _build_world_async() -> void:
 	_setup_road_paths()
 	_place_pond_data()
 	_place_house_sites()
-	# Bumpy terrain + grass; roads are a hi-res mask in the ground shader (no z-fighting ribbons).
-	_build_heightmap()
-	_road_mask_tex = _bake_road_mask()
+	# 1) Terrain cache: reuse heightmap + road mask when seed/settings match.
+	if not _try_load_terrain_cache():
+		_build_heightmap()
+		_road_mask_tex = _bake_road_mask()
+		_save_terrain_cache()
+	# Peaks are deterministic from seed; rebuild list even on terrain cache hits (for map).
+	_collect_mountain_peaks()
+	await get_tree().process_frame
 	_build_ground()
 	_build_world_bounds()
 	_place_player_on_spawn()
@@ -61,15 +119,423 @@ func _build_world_async() -> void:
 	await get_tree().process_frame
 	_build_houses()
 	await get_tree().process_frame
-	_build_forest()
+	# 2/3/4) Chunk streaming + collision LOD + deferred actors/pickups.
+	_setup_world_streamer()
+	apply_streaming_budget(GameSettings.streaming_budget())
+	await _load_streamer_meshes_only()
+	_finalize_streamer_meshes()
+	await _prewarm_runtime_assets()
 	await get_tree().process_frame
-	_build_rocks()
-	_build_bushes()
+	if not _try_load_placement_cache():
+		await _prepare_forest_chunks()
+		await get_tree().process_frame
+		await _prepare_rock_chunks()
+		await _prepare_bush_chunks()
+		await get_tree().process_frame
+		await _prepare_actor_spawns()
+		_prepare_treasure_spawns()
+		_save_placement_cache()
+	# Grass is filled lazily per near chunk (see ensure_chunk_grass).
 	await get_tree().process_frame
-	_build_animals()
-	_build_monsters()
+	if _streamer != null and _streamer.has_method("force_update"):
+		_streamer.call("force_update")
+	world_ready = true
+	world_built.emit()
+	print("World stream ready")
+
+func _terrain_cache_key() -> String:
+	return "m%d_h%d_r%d" % [mountain_count, int(mountain_height), int(mountain_radius)]
+
+
+func _placement_cache_key() -> String:
+	# "u4f" = even tree coverage (old caches piled trees on map edges, emptying the play area).
+	return "u4f_m%d_h%d_r%d_t%d_r%d_b%d_a%d_m%d_tr%d" % [
+		mountain_count, int(mountain_height), int(mountain_radius),
+		tree_count, 220, 420, animal_count, monster_count, treasure_count
+	]
+
+
+func _try_load_terrain_cache() -> bool:
+	if not use_terrain_cache:
+		return false
+	_height_res = maxi(terrain_resolution, 33)
+	if _height_res % 2 == 0:
+		_height_res += 1
+	var path: String = _TerrainCache.cache_path(seed_value, terrain_size, _height_res, _terrain_cache_key())
+	var data: Dictionary = _TerrainCache.try_load(path)
+	if data.is_empty():
+		return false
+	_height_res = int(data["height_res"])
+	_heights = data["heights"]
+	_natural_heights = data["natural_heights"]
+	_road_mask_tex = data["road_mask"]
+	print("Terrain cache hit: ", path)
+	return true
+
+
+func _save_terrain_cache() -> void:
+	if not use_terrain_cache or _road_mask_tex == null:
+		return
+	var path: String = _TerrainCache.cache_path(seed_value, terrain_size, _height_res, _terrain_cache_key())
+	if _TerrainCache.save(path, _height_res, _heights, _natural_heights, _road_mask_tex):
+		print("Terrain cache saved: ", path)
+
+
+func _setup_world_streamer() -> void:
+	var script := load("res://scripts/world_streamer.gd") as Script
+	if script == null:
+		push_warning("world_streamer.gd missing")
+		return
+	_streamer = Node.new()
+	_streamer.set_script(script)
+	_streamer.name = "WorldStreamer"
+	_streamer.set("chunk_size", chunk_size)
+	_streamer.set("visual_chunk_radius", stream_visual_chunks)
+	_streamer.set("collision_chunk_radius", stream_collision_chunks)
+	_streamer.set("grass_chunk_radius", stream_grass_chunks)
+	_streamer.set("actor_distance", actor_stream_distance)
+	add_child(_streamer)
+	_streamer.call("setup", self)
+
+
+func apply_streaming_budget(budget: Dictionary) -> void:
+	if budget.is_empty():
+		return
+	stream_visual_chunks = int(budget.get("visual_chunks", stream_visual_chunks))
+	stream_collision_chunks = int(budget.get("collision_chunks", stream_collision_chunks))
+	stream_grass_chunks = int(budget.get("grass_chunks", stream_grass_chunks))
+	grass_per_chunk = int(budget.get("grass_per_chunk", grass_per_chunk))
+	actor_stream_distance = float(budget.get("actor_distance", actor_stream_distance))
+	if _streamer == null:
+		return
+	_streamer.set("visual_chunk_radius", stream_visual_chunks)
+	_streamer.set("collision_chunk_radius", stream_collision_chunks)
+	_streamer.set("grass_chunk_radius", stream_grass_chunks)
+	_streamer.set("detail_chunk_radius", int(budget.get("detail_chunks", 2)))
+	_streamer.set("actor_distance", actor_stream_distance)
+	_streamer.set("update_interval", float(budget.get("update_interval", 0.25)))
+	if world_ready and _streamer.has_method("force_update"):
+		_streamer.call("force_update")
+
+
+func _prewarm_runtime_assets() -> void:
+	## Parse a few common GLBs during the boot overlay so first nearby spawn doesn't hitch.
+	var warm := [
+		"res://assets/kenney_animals/animal-deer.glb",
+		"res://assets/kenney_animals/animal-fox.glb",
+		"res://assets/kenney_animals/animal-bunny.glb",
+		"res://assets/kenney_monsters/character-zombie.glb",
+		"res://assets/kenney_monsters/character-skeleton.glb",
+	]
+	for i in warm.size():
+		var path: String = warm[i]
+		if ResourceLoader.exists(path):
+			var probe := _instantiate_glb_scene(path)
+			if not probe.is_empty() and probe.get("root") != null:
+				(probe["root"] as Node).free()
+		if i % 2 == 1:
+			await get_tree().process_frame
+
+
+func _finalize_streamer_meshes() -> void:
+	if _streamer == null or not _streamer.has_method("set_meshes"):
+		return
+	_streamer.call("set_meshes", _sm_trees, _sm_grass, _sm_rocks, _sm_rock_mats, _sm_bushes, _sm_flowers)
+
+
+func _try_load_placement_cache() -> bool:
+	if not use_placement_cache or _streamer == null:
+		return false
+	var path: String = _PlacementCache.cache_path(seed_value, terrain_size, _placement_cache_key())
+	var data: Dictionary = _PlacementCache.try_load(path)
+	if data.is_empty():
+		return false
+	_streamer.call("import_placement_data", data)
+	_rebuild_map_treasure_markers_from_cache(data.get("treasures", []))
+	_rebuild_map_actor_markers_from_cache(data.get("actors", []))
+	print("Placement cache hit: ", path)
+	return true
+
+
+func _save_placement_cache() -> void:
+	if not use_placement_cache or _streamer == null:
+		return
+	if not _streamer.has_method("export_placement_data"):
+		return
+	var data: Dictionary = _streamer.call("export_placement_data")
+	var path: String = _PlacementCache.cache_path(seed_value, terrain_size, _placement_cache_key())
+	if _PlacementCache.save(path, data):
+		print("Placement cache saved: ", path)
+
+
+func _rebuild_map_treasure_markers_from_cache(treasures: Array) -> void:
+	_map_treasure_markers.clear()
+	for tr in treasures:
+		if typeof(tr) != TYPE_DICTIONARY:
+			continue
+		var pid := str(tr.get("id", ""))
+		if pid != "" and _collected_pickups.has(pid):
+			continue
+		var pos: Vector3 = tr.get("pos", Vector3.ZERO)
+		_map_treasure_markers.append({
+			"id": pid,
+			"x": pos.x,
+			"z": pos.z,
+			"name": str(tr.get("item_name", "")),
+		})
+
+
+func _rebuild_map_actor_markers_from_cache(actors: Array) -> void:
+	_map_actor_markers.clear()
+	for a in actors:
+		if typeof(a) != TYPE_DICTIONARY:
+			continue
+		var pos: Vector3 = a.get("pos", Vector3.ZERO)
+		_map_actor_markers.append({
+			"x": pos.x,
+			"z": pos.z,
+			"kind": int(a.get("kind", 0)),
+		})
+
+
+func _load_streamer_meshes_only() -> void:
+	## Load GLB/primitive meshes once; placement may come from cache.
+	_load_tree_meshes()
 	await get_tree().process_frame
-	_build_grass()
+	_load_grass_meshes()
+	_load_rock_meshes()
+	await get_tree().process_frame
+	_load_bush_and_flower_meshes()
+
+
+func _load_tree_meshes() -> void:
+	if not _sm_trees.is_empty():
+		return
+	var tree_files := [
+		"tree_default.glb", "tree_default_dark.glb",
+		"tree_oak.glb", "tree_oak_dark.glb",
+		"tree_detailed.glb", "tree_detailed_dark.glb",
+		"tree_simple.glb", "tree_simple_dark.glb",
+		"tree_tall.glb", "tree_tall_dark.glb",
+		"tree_thin.glb", "tree_thin_dark.glb",
+		"tree_fat.glb", "tree_cone.glb", "tree_cone_dark.glb",
+		"tree_plateau.glb", "tree_plateau_dark.glb",
+		"tree_blocks.glb", "tree_small.glb",
+		"tree_pineDefaultA.glb", "tree_pineDefaultB.glb",
+		"tree_pineTallA.glb", "tree_pineTallB.glb", "tree_pineTallC.glb", "tree_pineTallD.glb",
+		"tree_pineTallA_detailed.glb", "tree_pineTallB_detailed.glb",
+		"tree_pineRoundA.glb", "tree_pineRoundB.glb", "tree_pineRoundC.glb", "tree_pineRoundD.glb",
+		"tree_pineSmallA.glb", "tree_pineSmallB.glb",
+	]
+	for file_name in tree_files:
+		var mesh := _load_glb_mesh("res://assets/kenney_trees/%s" % file_name)
+		if mesh != null:
+			_sm_trees.append(mesh)
+
+
+func _load_grass_meshes() -> void:
+	if not _sm_grass.is_empty():
+		return
+	var grass_files := [
+		"grass.glb", "grass_large.glb",
+		"grass_leafs.glb", "grass_leafsLarge.glb",
+		"plant_flatShort.glb", "plant_flatTall.glb",
+	]
+	_grass_native_h.clear()
+	for file_name in grass_files:
+		var mesh := _load_glb_mesh("res://assets/kenney_plants/%s" % file_name)
+		if mesh == null:
+			continue
+		_sm_grass.append(mesh)
+		_grass_native_h.append(maxf(mesh.get_aabb().size.y, 0.05))
+
+
+func _load_rock_meshes() -> void:
+	if not _sm_rocks.is_empty():
+		return
+	var mat_a := _make_mat(Color(0.45, 0.43, 0.40), 0.95)
+	var mat_b := _make_mat(Color(0.38, 0.37, 0.35), 0.98)
+	var mat_c := _make_mat(Color(0.52, 0.50, 0.46), 0.92)
+	var sphere_mesh := SphereMesh.new()
+	sphere_mesh.radius = 1.0
+	sphere_mesh.height = 1.5
+	sphere_mesh.radial_segments = 8
+	sphere_mesh.rings = 4
+	var box_mesh := BoxMesh.new()
+	box_mesh.size = Vector3(1.8, 1.1, 1.4)
+	var tall_mesh := SphereMesh.new()
+	tall_mesh.radius = 0.9
+	tall_mesh.height = 2.4
+	tall_mesh.radial_segments = 8
+	tall_mesh.rings = 5
+	_sm_rocks.append(sphere_mesh)
+	_sm_rocks.append(box_mesh)
+	_sm_rocks.append(tall_mesh)
+	_sm_rock_mats.append(mat_a)
+	_sm_rock_mats.append(mat_b)
+	_sm_rock_mats.append(mat_c)
+
+
+func _load_bush_and_flower_meshes() -> void:
+	if _sm_bushes.is_empty():
+		var bush_files := [
+			"plant_bush.glb", "plant_bushDetailed.glb",
+			"plant_bushLarge.glb", "plant_bushSmall.glb", "plant_bushTriangle.glb",
+		]
+		for file_name in bush_files:
+			var mesh := _load_glb_mesh("res://assets/kenney_plants/%s" % file_name)
+			if mesh != null:
+				_sm_bushes.append(mesh)
+	if _sm_flowers.is_empty():
+		var flower_files := [
+			"flower_purpleA.glb", "flower_purpleB.glb",
+			"flower_yellowA.glb", "flower_yellowB.glb",
+			"flower_redA.glb", "flower_redB.glb",
+		]
+		for file_name in flower_files:
+			var mesh := _load_glb_mesh("res://assets/kenney_plants/%s" % file_name)
+			if mesh != null:
+				_sm_flowers.append(mesh)
+
+
+func ensure_chunk_grass(chunk: Vector2i, cs: float) -> void:
+	## Lazily scatter grass inside one chunk the first time it enters the grass ring.
+	if _grass_filled_chunks.has(chunk):
+		return
+	if _streamer == null or _sm_grass.is_empty() or _grass_native_h.is_empty():
+		# Do not mark filled ? meshes may not be ready yet on very early calls.
+		return
+	var rng := RandomNumberGenerator.new()
+	# Stable per-chunk seed so revisiting looks the same.
+	rng.seed = seed_value + 404 + int(chunk.x) * 73856093 + int(chunk.y) * 19349663
+	var x0 := float(chunk.x) * cs
+	var z0 := float(chunk.y) * cs
+	var margin := 1.5
+	var placed := 0
+	var attempts := 0
+	var max_attempts := grass_per_chunk * 10
+	while placed < grass_per_chunk and attempts < max_attempts:
+		attempts += 1
+		var p := Vector3(
+			rng.randf_range(x0 + margin, x0 + cs - margin),
+			0.0,
+			rng.randf_range(z0 + margin, z0 + cs - margin)
+		)
+		if p.length() < 8.0:
+			continue
+		if _blocked(p, 3.0) or _too_steep_or_peak(p):
+			continue
+		p = _stamp_height(p)
+		var t := rng.randi_range(0, _sm_grass.size() - 1)
+		var target_h := rng.randf_range(0.35, 1.15)
+		var s := target_h / _grass_native_h[t]
+		var sxz := s * rng.randf_range(0.85, 1.25)
+		var sy := s * rng.randf_range(0.8, 1.2)
+		var yaw := rng.randf_range(0.0, TAU)
+		var lean := Basis(Vector3.UP, yaw)
+		lean = lean.rotated(lean.x, rng.randf_range(-0.12, 0.12))
+		lean = lean.rotated(lean.z, rng.randf_range(-0.1, 0.1))
+		var basis := lean.scaled(Vector3(sxz, sy, sxz))
+		var sink := rng.randf_range(0.0, 0.04) * sy
+		_streamer.call("add_grass", Transform3D(basis, p + Vector3(0.0, -sink, 0.0)), t)
+		placed += 1
+	# Mark after attempting so a failed early call (no meshes) can retry.
+	_grass_filled_chunks[chunk] = true
+
+
+func refresh_world_stream() -> void:
+	if _streamer != null and _streamer.has_method("force_update"):
+		_streamer.call("force_update")
+
+
+func mark_pickup_collected(pickup_id: String) -> void:
+	_collected_pickups[pickup_id] = true
+	if _streamer != null and _streamer.has_method("_despawn_treasure"):
+		_streamer.call("_despawn_treasure", pickup_id)
+
+
+func get_collected_pickups() -> Array:
+	return _collected_pickups.keys()
+
+
+func apply_collected_pickups(ids: Variant) -> void:
+	_collected_pickups.clear()
+	if typeof(ids) != TYPE_ARRAY:
+		return
+	for id in ids:
+		_collected_pickups[str(id)] = true
+	for node in get_tree().get_nodes_in_group("world_pickup"):
+		var pid := ""
+		if "pickup_id" in node:
+			pid = str(node.pickup_id)
+		if pid != "" and _collected_pickups.has(pid):
+			node.queue_free()
+
+
+func get_map_data() -> Dictionary:
+	var pickups: Array = []
+	for m in _map_treasure_markers:
+		var pid := str(m.get("id", ""))
+		if pid != "" and _collected_pickups.has(pid):
+			continue
+		pickups.append(m)
+	for node in get_tree().get_nodes_in_group("world_pickup"):
+		if node.has_method("get_map_marker"):
+			pickups.append(node.call("get_map_marker"))
+	if _map_height_preview == null:
+		_map_height_preview = _build_map_height_preview(40)
+	return {
+		"size": terrain_size,
+		"road_width": road_width,
+		"roads": _road_paths.duplicate(true),
+		"ponds": _ponds.duplicate(),
+		"houses": _house_map_footprints.duplicate(true) if not _house_map_footprints.is_empty() else _house_pads_as_map_rects(),
+		"mountains": _mountain_peaks.duplicate(),
+		"pickups": pickups,
+		"actors": _map_actor_markers.duplicate(true),
+		"height_preview": _map_height_preview,
+	}
+
+
+func _house_pads_as_map_rects() -> Array:
+	## Fallback before houses finish building: pad radius as circular yard.
+	var out: Array = []
+	for pad in _house_pads:
+		out.append({"x": pad.x, "z": pad.z, "sx": pad.y * 2.0, "sz": pad.y * 2.0, "yaw": 0.0, "circle": true})
+	return out
+
+
+func _build_map_height_preview(res: int) -> Image:
+	## Coarse height tint for the world map (green low ? rock high).
+	var img := Image.create(res, res, false, Image.FORMAT_RGBA8)
+	if _heights.is_empty() or _height_res < 2:
+		img.fill(Color(0.2, 0.35, 0.2, 1.0))
+		return img
+	var half := terrain_size * 0.5
+	var h_min := 1.0e20
+	var h_max := -1.0e20
+	for i in _heights.size():
+		h_min = minf(h_min, _heights[i])
+		h_max = maxf(h_max, _heights[i])
+	var span := maxf(h_max - h_min, 1.0)
+	for y in res:
+		for x in res:
+			var wx := -half + terrain_size * (float(x) + 0.5) / float(res)
+			# Image row 0 is top of map = world -Z (north), same as _world_to_map.
+			var wz := -half + terrain_size * (float(y) + 0.5) / float(res)
+			var h := _sample_height_array(_heights, wx, wz)
+			var t := clampf((h - h_min) / span, 0.0, 1.0)
+			var col: Color
+			if t < 0.35:
+				col = Color(0.18, 0.38, 0.2).lerp(Color(0.28, 0.48, 0.24), t / 0.35)
+			elif t < 0.65:
+				col = Color(0.28, 0.48, 0.24).lerp(Color(0.42, 0.5, 0.3), (t - 0.35) / 0.3)
+			elif t < 0.85:
+				col = Color(0.42, 0.5, 0.3).lerp(Color(0.55, 0.5, 0.4), (t - 0.65) / 0.2)
+			else:
+				col = Color(0.55, 0.5, 0.4).lerp(Color(0.78, 0.78, 0.8), (t - 0.85) / 0.15)
+			img.set_pixel(x, y, col)
+	return img
 
 
 func _inside_pond(p: Vector3, padding: float = 2.0) -> bool:
@@ -144,35 +610,84 @@ func is_blocked_for_critter(p: Vector3, padding: float = 2.0) -> bool:
 	return _blocked(p, padding)
 
 
-## Pure random scatter (not grid). Optional ring bias around origin for spawn activity.
+## Even coverage with local randomness: stratified jittered cells + min separation.
+## Avoids the old "ring near spawn" bias that made creatures look clumped / non-random.
 func _sample_positions_random(
 	count: int,
 	margin: float,
 	min_clear: float,
 	rng: RandomNumberGenerator,
-	near_weight: float = 0.0,
-	near_radius: float = 60.0
+	_near_weight: float = 0.0,
+	_near_radius: float = 60.0,
+	min_sep: float = 0.0
 ) -> Array[Vector3]:
 	var half := terrain_size * 0.5 - margin
+	var span := maxf(half * 2.0, 1.0)
 	var positions: Array[Vector3] = []
-	var attempts := 0
-	while positions.size() < count and attempts < count * 40:
-		attempts += 1
-		var p: Vector3
-		if near_weight > 0.0 and rng.randf() < near_weight:
-			var ang := rng.randf_range(0.0, TAU)
-			var dist := rng.randf_range(min_clear + 2.0, near_radius)
-			p = Vector3(cos(ang) * dist, 0.0, sin(ang) * dist)
-		else:
-			p = Vector3(rng.randf_range(-half, half), 0.0, rng.randf_range(-half, half))
+	if count <= 0:
+		return positions
+	var sep := min_sep
+	if sep <= 0.0:
+		# Aim for roughly even spacing across the playable square.
+		sep = clampf(span / sqrt(float(count) * 1.15), 8.0, 48.0)
+
+	var cells := maxi(ceili(sqrt(float(count)) * 1.4), 4)
+	var cell := span / float(cells)
+	var order: Array[int] = []
+	order.resize(cells * cells)
+	for i in order.size():
+		order[i] = i
+	for i in order.size():
+		var j := rng.randi_range(i, order.size() - 1)
+		var tmp := order[i]
+		order[i] = order[j]
+		order[j] = tmp
+
+	for idx in order:
+		if positions.size() >= count:
+			break
+		var cx := idx % cells
+		var cz := int(idx / cells)
+		var p := Vector3(
+			-half + (float(cx) + rng.randf()) * cell,
+			0.0,
+			-half + (float(cz) + rng.randf()) * cell
+		)
 		p.x = clampf(p.x, -half, half)
 		p.z = clampf(p.z, -half, half)
 		if p.length() < min_clear:
 			continue
 		if _blocked(p, 3.0):
 			continue
+		if not _sep_ok(p, positions, sep):
+			continue
 		positions.append(_stamp_height(p))
+
+	# Top up leftovers with pure rejection sampling if roads/ponds ate too many cells.
+	var attempts := 0
+	while positions.size() < count and attempts < count * 60:
+		attempts += 1
+		var p2 := Vector3(rng.randf_range(-half, half), 0.0, rng.randf_range(-half, half))
+		if p2.length() < min_clear:
+			continue
+		if _blocked(p2, 3.0):
+			continue
+		if not _sep_ok(p2, positions, sep * 0.85):
+			continue
+		positions.append(_stamp_height(p2))
 	return positions
+
+
+func _sep_ok(p: Vector3, existing: Array[Vector3], sep: float) -> bool:
+	if sep <= 0.0 or existing.is_empty():
+		return true
+	var sep2 := sep * sep
+	for q in existing:
+		var dx := p.x - q.x
+		var dz := p.z - q.z
+		if dx * dx + dz * dz < sep2:
+			return false
+	return true
 
 
 func _place_player_on_spawn() -> void:
@@ -263,6 +778,9 @@ func _build_heightmap() -> void:
 			h += micro.get_noise_2d(x, z) * micro_bump_height
 			_heights[zi * _height_res + xi] = h
 
+	# Distinct mountain peaks (not just rolling hills).
+	_stamp_mountains()
+
 	# Round creases into arcs before (and after) feature stamps.
 	_smooth_height_field(height_smooth_passes)
 	_natural_heights = _heights.duplicate()
@@ -313,6 +831,79 @@ func _smooth_height_field(passes: int) -> void:
 						wsum += w
 				next[zi * n + xi] = acc / wsum
 		_heights = next
+
+
+func _mountain_peak_layout() -> Array:
+	## Deterministic peak centers + radii (must match stamp RNG order).
+	var out: Array = []
+	if mountain_count <= 0 or mountain_height <= 0.0:
+		return out
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value + 707
+	var half := terrain_size * 0.5 - mountain_radius * 0.55
+	var peaks: Array[Vector2] = [
+		Vector2(280.0, -260.0),
+		Vector2(-320.0, -180.0),
+		Vector2(-240.0, 310.0),
+		Vector2(340.0, 220.0),
+		Vector2(-60.0, -380.0),
+		Vector2(120.0, 360.0),
+	]
+	while peaks.size() < mountain_count:
+		var candidate := Vector2(rng.randf_range(-half, half), rng.randf_range(-half, half))
+		if candidate.length() < 140.0:
+			continue
+		var ok := true
+		for existing in peaks:
+			if existing.distance_to(candidate) < mountain_radius * 1.15:
+				ok = false
+				break
+		if ok:
+			peaks.append(candidate)
+	for i in mini(peaks.size(), mountain_count):
+		var c: Vector2 = peaks[i]
+		var radius := mountain_radius * rng.randf_range(0.75, 1.2)
+		var peak_h := mountain_height * rng.randf_range(0.7, 1.15)
+		var stretch := Vector2(rng.randf_range(0.85, 1.2), rng.randf_range(0.85, 1.2))
+		out.append({"c": c, "radius": radius, "peak_h": peak_h, "stretch": stretch})
+	return out
+
+
+func _collect_mountain_peaks() -> void:
+	_mountain_peaks.clear()
+	for item in _mountain_peak_layout():
+		var c: Vector2 = item["c"]
+		_mountain_peaks.append(Vector3(c.x, float(item["radius"]), c.y))
+
+
+func _stamp_mountains() -> void:
+	for item in _mountain_peak_layout():
+		var c: Vector2 = item["c"]
+		_raise_mountain(c.x, c.y, float(item["radius"]), float(item["peak_h"]), item["stretch"])
+
+
+func _raise_mountain(cx: float, cz: float, radius: float, peak_h: float, stretch: Vector2) -> void:
+	var half := terrain_size * 0.5
+	var outer := radius * 1.35
+	for zi in _height_res:
+		for xi in _height_res:
+			var x := -half + terrain_size * float(xi) / float(_height_res - 1)
+			var z := -half + terrain_size * float(zi) / float(_height_res - 1)
+			var dx := (x - cx) / maxf(stretch.x, 0.2)
+			var dz := (z - cz) / maxf(stretch.y, 0.2)
+			var d := sqrt(dx * dx + dz * dz)
+			if d >= outer:
+				continue
+			# Smooth dome: flat-ish summit, steep mid-slope, soft foothills.
+			var t := clampf(d / maxf(radius, 0.001), 0.0, 1.0)
+			var w := 1.0 - t
+			w = w * w * (3.0 - 2.0 * w)
+			w = pow(w, 1.35)
+			if d > radius:
+				var edge := 1.0 - (d - radius) / maxf(outer - radius, 0.001)
+				w *= clampf(edge, 0.0, 1.0)
+			var idx := zi * _height_res + xi
+			_heights[idx] += peak_h * w
 
 
 func _flatten_disc(cx: float, cz: float, radius: float, target: float, feather: float) -> void:
@@ -434,6 +1025,14 @@ func _build_ground() -> void:
 	ground.name = "Ground"
 	ground.mesh = mesh
 	ground.material_override = _make_ground_material()
+	# Huge heightfield: force a conservative AABB so frustum culling never drops
+	# a peak that sits near the AABB edge when looked at head-on.
+	var y_max := mountain_height + hill_height + bump_height + 40.0
+	ground.custom_aabb = AABB(
+		Vector3(-half - 20.0, -20.0, -half - 20.0),
+		Vector3(terrain_size + 40.0, y_max + 40.0, terrain_size + 40.0)
+	)
+	ground.extra_cull_margin = 80.0
 	add_child(ground)
 
 	var body := StaticBody3D.new()
@@ -541,38 +1140,100 @@ func _load_kenney_texture(res_path: String) -> Texture2D:
 	return load(res_path) as Texture2D
 
 
-func _sample_positions(count: int, margin: float, clear_radius: float, rng: RandomNumberGenerator) -> Array[Vector3]:
+func _sample_positions(
+	count: int,
+	margin: float,
+	clear_radius: float,
+	rng: RandomNumberGenerator,
+	min_spacing: float = -1.0
+) -> Array[Vector3]:
+	## Stratified jittered cells in shuffled order ? even coverage (no edge pile-up).
 	var half := terrain_size * 0.5 - margin
-	var cell := sqrt((terrain_size * terrain_size) / float(maxi(count, 1)))
-	cell = maxf(cell, 4.0)
+	var span := maxf(half * 2.0, 1.0)
+	var spacing := min_spacing if min_spacing > 0.0 else maxf(tree_min_spacing, 4.0)
 	var positions: Array[Vector3] = []
-	var x := -half
-	while x <= half and positions.size() < count:
-		var z := -half
-		while z <= half and positions.size() < count:
-			var jitter := cell * 0.35
-			var p := Vector3(
-				x + rng.randf_range(-jitter, jitter),
-				0.0,
-				z + rng.randf_range(-jitter, jitter)
-			)
-			p.x = clampf(p.x, -half, half)
-			p.z = clampf(p.z, -half, half)
-			if p.length() >= clear_radius and not _blocked(p, 4.0):
-				# Soft density: occasionally skip a cell for natural gaps
-				if rng.randf() > 0.12:
-					positions.append(_stamp_height(p))
-			z += cell
-		x += cell
+	if count <= 0:
+		return positions
+	var grid: Dictionary = {}
+	# Slightly denser than spacing so blocked cells (roads/houses) don't leave blank regions.
+	var cells := maxi(ceili(span / maxf(spacing * 0.92, 4.0)), 8)
+	var cell := span / float(cells)
+	var order: Array[int] = []
+	order.resize(cells * cells)
+	for i in order.size():
+		order[i] = i
+	for i in order.size():
+		var j := rng.randi_range(i, order.size() - 1)
+		var tmp := order[i]
+		order[i] = order[j]
+		order[j] = tmp
 
-	# Fill remaining with random samples if grid undershot
-	var attempts := 0
-	while positions.size() < count and attempts < count * 8:
-		attempts += 1
-		var p := Vector3(rng.randf_range(-half, half), 0.0, rng.randf_range(-half, half))
-		if p.length() >= clear_radius and not _blocked(p, 4.0):
+	for idx in order:
+		if positions.size() >= count:
+			break
+		var cx := idx % cells
+		var cz := int(idx / cells)
+		var p := Vector3(
+			-half + (float(cx) + rng.randf()) * cell,
+			0.0,
+			-half + (float(cz) + rng.randf()) * cell
+		)
+		p.x = clampf(p.x, -half, half)
+		p.z = clampf(p.z, -half, half)
+		if p.length() < clear_radius:
+			continue
+		if _blocked(p, 3.5) or _too_steep_or_peak(p):
+			continue
+		# Light thin-out only ? old 8% skip + coarse grid emptied the playable center.
+		if rng.randf() < 0.03:
+			continue
+		if _try_accept_spaced(p, grid, spacing):
 			positions.append(_stamp_height(p))
+
+	var attempts := 0
+	var max_attempts := mini(count * 20, 60000)
+	while positions.size() < count and attempts < max_attempts:
+		attempts += 1
+		var p2 := Vector3(rng.randf_range(-half, half), 0.0, rng.randf_range(-half, half))
+		if p2.length() < clear_radius or _blocked(p2, 3.5) or _too_steep_or_peak(p2):
+			continue
+		if _try_accept_spaced(p2, grid, spacing * 0.9):
+			positions.append(_stamp_height(p2))
 	return positions
+
+
+func _try_accept_spaced(p: Vector3, grid: Dictionary, min_dist: float) -> bool:
+	var cell := maxf(min_dist, 0.5)
+	var cx := floori(p.x / cell)
+	var cz := floori(p.z / cell)
+	var min2 := min_dist * min_dist
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			var key := Vector2i(cx + dx, cz + dz)
+			if not grid.has(key):
+				continue
+			var bucket: Array = grid[key]
+			for q in bucket:
+				var dx2: float = p.x - q.x
+				var dz2: float = p.z - q.y
+				if dx2 * dx2 + dz2 * dz2 < min2:
+					return false
+	var home := Vector2i(cx, cz)
+	if not grid.has(home):
+		grid[home] = []
+	(grid[home] as Array).append(Vector2(p.x, p.z))
+	return true
+
+
+func _too_steep_or_peak(p: Vector3) -> bool:
+	# Keep tree line below rocky summits; only skip truly steep faces (old 4.2 wiped foothills).
+	var h := _height_at(p.x, p.z)
+	if h > mountain_height * 0.70:
+		return true
+	var step := 2.5
+	var hx := absf(_height_at(p.x + step, p.z) - _height_at(p.x - step, p.z))
+	var hz := absf(_height_at(p.x, p.z + step) - _height_at(p.x, p.z - step))
+	return maxf(hx, hz) > 7.0
 
 
 func _setup_road_paths() -> void:
@@ -1058,13 +1719,17 @@ func _build_pond_meshes() -> void:
 		shore.material_override = shore_mat
 		pond_root.add_child(shore)
 
+		# Tall solid volume: player sticks to terrain Y, so only XZ blockers keep them off water.
 		var body := StaticBody3D.new()
+		body.name = "WaterBlocker"
+		body.collision_layer = 1
+		body.collision_mask = 0
 		var col := CollisionShape3D.new()
 		var shape := CylinderShape3D.new()
-		shape.radius = radius
-		shape.height = 0.2
+		shape.radius = radius * 0.98
+		shape.height = 4.0
 		col.shape = shape
-		col.position.y = 0.05
+		col.position.y = 1.6
 		body.add_child(col)
 		pond_root.add_child(body)
 
@@ -1298,64 +1963,9 @@ func _height_to_normal_map(height_img: Image, strength: float) -> Image:
 	return out
 
 
-func _build_grass() -> void:
-	# Kenney Nature Kit ground cover — matches the tree style instead of cardboard quads.
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed_value + 404
-	var positions := _sample_positions(grass_count, 3.5, 10.0, rng)
-	if positions.is_empty():
-		return
-
-	var grass_files := [
-		"grass.glb", "grass_large.glb",
-		"grass_leafs.glb", "grass_leafsLarge.glb",
-		"plant_flatShort.glb", "plant_flatTall.glb",
-	]
-	var meshes: Array[Mesh] = []
-	var native_h: Array[float] = []
-	for file_name in grass_files:
-		var mesh := _load_glb_mesh("res://assets/kenney_plants/%s" % file_name)
-		if mesh == null:
-			continue
-		meshes.append(mesh)
-		native_h.append(maxf(mesh.get_aabb().size.y, 0.05))
-	if meshes.is_empty():
-		push_warning("No Kenney grass models loaded")
-		return
-
-	var type_of: Array[int] = []
-	type_of.resize(positions.size())
-	var type_counts: Array[int] = []
-	type_counts.resize(meshes.size())
-	type_counts.fill(0)
-	for i in positions.size():
-		var t := rng.randi_range(0, meshes.size() - 1)
-		type_of[i] = t
-		type_counts[t] += 1
-
-	var mms: Array[MultiMeshInstance3D] = []
-	for i in meshes.size():
-		mms.append(_make_multimesh("KenneyGrass_%d" % i, meshes[i], type_counts[i], null))
-
-	var writes: Array[int] = []
-	writes.resize(meshes.size())
-	writes.fill(0)
-	for i in positions.size():
-		var p: Vector3 = positions[i]
-		var t: int = type_of[i]
-		var wi: int = writes[t]
-		writes[t] = wi + 1
-		var target_h := rng.randf_range(0.35, 1.15)
-		var s := target_h / native_h[t]
-		var sxz := s * rng.randf_range(0.85, 1.25)
-		var sy := s * rng.randf_range(0.8, 1.2)
-		var yaw := rng.randf_range(0.0, TAU)
-		var lean := Basis(Vector3.UP, yaw)
-		lean = lean.rotated(lean.x, rng.randf_range(-0.12, 0.12))
-		lean = lean.rotated(lean.z, rng.randf_range(-0.1, 0.1))
-		var basis := lean.scaled(Vector3(sxz, sy, sxz))
-		var sink := rng.randf_range(0.0, 0.04) * sy
-		mms[t].multimesh.set_instance_transform(wi, Transform3D(basis, p + Vector3(0.0, -sink, 0.0)))
+func _prepare_grass_chunks() -> void:
+	## Deprecated: grass is generated lazily in ensure_chunk_grass().
+	pass
 
 
 func _make_multimesh(name: String, mesh: Mesh, count: int, mat: Material) -> MultiMeshInstance3D:
@@ -1487,6 +2097,7 @@ func _nearest_road_direction(p: Vector3) -> float:
 
 
 func _build_houses() -> void:
+	_house_map_footprints.clear()
 	if _house_pads.is_empty():
 		return
 	var meshes: Array[Mesh] = []
@@ -1533,6 +2144,14 @@ func _build_houses() -> void:
 		var y := _height_at(pad.x, pad.z) + 0.04
 		var y_off := -aabb.position.y * s
 		var size := Vector3(aabb.size.x * s, aabb.size.y * s, aabb.size.z * s)
+		_house_map_footprints.append({
+			"x": pad.x,
+			"z": pad.z,
+			"sx": size.x,
+			"sz": size.z,
+			"yaw": yaw,
+			"circle": false,
+		})
 
 		var house := Node3D.new()
 		house.name = "House_%d" % i
@@ -1571,87 +2190,64 @@ func _build_houses() -> void:
 		house.call("configure", mi, body, size, y)
 
 
-func _build_forest() -> void:
+func _prepare_forest_chunks() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
-	var positions := _sample_positions(tree_count, 8.0, 18.0, rng)
-	if positions.is_empty():
+	# Small spawn clearing only ? forest should start just outside the pad.
+	var positions := _sample_positions(tree_count, 8.0, 14.0, rng, tree_min_spacing)
+	# Guarantee a visible grove around the player (old caches left the center nearly empty).
+	_append_near_spawn_trees(positions, rng, 110, 18.0, 150.0, tree_min_spacing * 0.85)
+	if positions.is_empty() or _streamer == null:
 		return
-
-	# Kenney Nature Kit trees (CC0) — mixed deciduous + pine set.
-	var tree_files := [
-		"tree_default.glb", "tree_default_dark.glb",
-		"tree_oak.glb", "tree_oak_dark.glb",
-		"tree_detailed.glb", "tree_detailed_dark.glb",
-		"tree_simple.glb", "tree_simple_dark.glb",
-		"tree_tall.glb", "tree_tall_dark.glb",
-		"tree_thin.glb", "tree_thin_dark.glb",
-		"tree_fat.glb", "tree_cone.glb", "tree_cone_dark.glb",
-		"tree_plateau.glb", "tree_plateau_dark.glb",
-		"tree_blocks.glb", "tree_small.glb",
-		"tree_pineDefaultA.glb", "tree_pineDefaultB.glb",
-		"tree_pineTallA.glb", "tree_pineTallB.glb", "tree_pineTallC.glb", "tree_pineTallD.glb",
-		"tree_pineTallA_detailed.glb", "tree_pineTallB_detailed.glb",
-		"tree_pineRoundA.glb", "tree_pineRoundB.glb", "tree_pineRoundC.glb", "tree_pineRoundD.glb",
-		"tree_pineSmallA.glb", "tree_pineSmallB.glb",
-	]
-
-	var meshes: Array[Mesh] = []
-	var native_heights: Array[float] = []
-	for file_name in tree_files:
-		var mesh := _load_glb_mesh("res://assets/kenney_trees/%s" % file_name)
-		if mesh == null:
-			continue
-		meshes.append(mesh)
-		var h := mesh.get_aabb().size.y
-		native_heights.append(maxf(h, 0.4))
-
-	if meshes.is_empty():
+	print("Forest trees prepared: ", positions.size(), " / ", tree_count)
+	await get_tree().process_frame
+	_load_tree_meshes()
+	if _sm_trees.is_empty():
 		push_warning("No Kenney tree models loaded from res://assets/kenney_trees/")
 		return
-
-	var type_of: Array[int] = []
-	type_of.resize(positions.size())
-	var type_counts: Array[int] = []
-	type_counts.resize(meshes.size())
-	type_counts.fill(0)
-	for i in positions.size():
-		var t := rng.randi_range(0, meshes.size() - 1)
-		type_of[i] = t
-		type_counts[t] += 1
-
-	var mms: Array[MultiMeshInstance3D] = []
-	for i in meshes.size():
-		# Keep Kenney surface materials (trunk + leaves); do not override.
-		mms.append(_make_multimesh("KenneyTree_%d" % i, meshes[i], type_counts[i], null))
-
-	var writes: Array[int] = []
-	writes.resize(meshes.size())
-	writes.fill(0)
-
-	var trunk_colliders := Node3D.new()
-	trunk_colliders.name = "TrunkColliders"
-	add_child(trunk_colliders)
-
+	var native_heights: Array[float] = []
+	for mesh in _sm_trees:
+		native_heights.append(maxf(mesh.get_aabb().size.y, 0.4))
 	for i in positions.size():
 		var p: Vector3 = positions[i]
-		var t: int = type_of[i]
-		var wi: int = writes[t]
-		writes[t] = wi + 1
-
+		var t := rng.randi_range(0, _sm_trees.size() - 1)
 		var target_h := rng.randf_range(6.5, 14.0)
 		var s := target_h / native_heights[t]
-		# Slight non-uniform scale for variety.
-		var sxz := s * rng.randf_range(0.9, 1.15)
+		var sxz := s * rng.randf_range(0.82, 1.02)
 		var sy := s * rng.randf_range(0.9, 1.2)
 		var yaw := rng.randf_range(0.0, TAU)
 		var basis := Basis(Vector3.UP, yaw).scaled(Vector3(sxz, sy, sxz))
-		mms[t].multimesh.set_instance_transform(wi, Transform3D(basis, p))
-
-		# Thin trunk-only collider — canopy must not block walking.
 		var col_h := clampf(target_h * 0.32, 1.2, 4.0)
 		var col_r := clampf(0.045 * sxz, 0.1, 0.32)
-		_add_cylinder_body(trunk_colliders, p, col_r, col_h)
+		_streamer.call("add_tree", Transform3D(basis, p), t, col_r, col_h)
+		if i > 0 and i % 400 == 0:
+			await get_tree().process_frame
+
+
+func _append_near_spawn_trees(
+	positions: Array[Vector3],
+	rng: RandomNumberGenerator,
+	extra: int,
+	inner_r: float,
+	outer_r: float,
+	spacing: float
+) -> void:
+	var grid: Dictionary = {}
+	for existing in positions:
+		_try_accept_spaced(existing, grid, spacing)
+	var attempts := 0
+	var added := 0
+	while added < extra and attempts < extra * 40:
+		attempts += 1
+		var ang := rng.randf_range(0.0, TAU)
+		var dist := rng.randf_range(inner_r, outer_r)
+		var p := Vector3(cos(ang) * dist, 0.0, sin(ang) * dist)
+		if _blocked(p, 3.0) or _too_steep_or_peak(p):
+			continue
+		if not _try_accept_spaced(p, grid, spacing):
+			continue
+		positions.append(_stamp_height(p))
+		added += 1
 
 
 func _scatter_shore_rocks(pond_root: Node3D, radius: float, rng: RandomNumberGenerator) -> void:
@@ -1696,67 +2292,25 @@ func _scatter_shore_rocks(pond_root: Node3D, radius: float, rng: RandomNumberGen
 		pond_root.add_child(body)
 
 
-func _build_rocks() -> void:
+func _prepare_rock_chunks() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value + 7
-
-	var mat_a := _make_mat(Color(0.45, 0.43, 0.40), 0.95)
-	var mat_b := _make_mat(Color(0.38, 0.37, 0.35), 0.98)
-	var mat_c := _make_mat(Color(0.52, 0.50, 0.46), 0.92)
-
-	var sphere_mesh := SphereMesh.new()
-	sphere_mesh.radius = 1.0
-	sphere_mesh.height = 1.5
-	sphere_mesh.radial_segments = 8
-	sphere_mesh.rings = 4
-
-	var box_mesh := BoxMesh.new()
-	box_mesh.size = Vector3(1.8, 1.1, 1.4)
-
-	var tall_mesh := SphereMesh.new()
-	tall_mesh.radius = 0.9
-	tall_mesh.height = 2.4
-	tall_mesh.radial_segments = 8
-	tall_mesh.rings = 5
-
+	if _streamer == null:
+		return
+	await get_tree().process_frame
+	_load_rock_meshes()
 	var count := 220
-	var positions := _sample_positions(count, 10.0, 12.0, rng)
-
-	var n_sphere := 0
-	var n_box := 0
-	var n_tall := 0
-	var kinds: Array[int] = []
-	kinds.resize(positions.size())
+	var positions := _sample_positions(count, 10.0, 12.0, rng, 10.0)
 	for i in positions.size():
+		var p: Vector3 = positions[i]
 		var roll := rng.randf()
 		var k := 0
 		if roll < 0.45:
 			k = 0
-			n_sphere += 1
 		elif roll < 0.78:
 			k = 1
-			n_box += 1
 		else:
 			k = 2
-			n_tall += 1
-		kinds[i] = k
-
-	var mm_sphere := _make_multimesh("Rocks_Sphere", sphere_mesh, n_sphere, mat_a)
-	var mm_box := _make_multimesh("Rocks_Box", box_mesh, n_box, mat_b)
-	var mm_tall := _make_multimesh("Rocks_Tall", tall_mesh, n_tall, mat_c)
-	var writes := [0, 0, 0]
-	var mms := [mm_sphere, mm_box, mm_tall]
-
-	var rock_colliders := Node3D.new()
-	rock_colliders.name = "RockColliders"
-	add_child(rock_colliders)
-
-	for i in positions.size():
-		var p: Vector3 = positions[i]
-		var k: int = kinds[i]
-		var wi: int = writes[k]
-		writes[k] = wi + 1
-
 		var s: Vector3
 		match k:
 			0:
@@ -1765,141 +2319,75 @@ func _build_rocks() -> void:
 				s = Vector3(rng.randf_range(0.8, 2.8), rng.randf_range(0.45, 1.6), rng.randf_range(0.8, 2.4))
 			_:
 				s = Vector3(rng.randf_range(0.8, 2.0), rng.randf_range(1.0, 2.8), rng.randf_range(0.8, 2.0))
-
 		var yaw := rng.randf_range(0.0, TAU)
 		var basis := Basis(Vector3.UP, yaw)
 		basis = basis.rotated(basis.x, rng.randf_range(-0.3, 0.3))
 		basis = basis.scaled(s)
 		var origin := p + Vector3(0.0, s.y * 0.35, 0.0)
-		mms[k].multimesh.set_instance_transform(wi, Transform3D(basis, origin))
-
+		var col: Dictionary
 		match k:
 			0:
-				_add_sphere_body(rock_colliders, origin, maxf(s.x, s.z) * 0.5)
+				col = {"shape": 0, "radius": maxf(s.x, s.z) * 0.5}
 			1:
-				_add_box_body(
-					rock_colliders,
-					origin,
-					Vector3(1.8 * s.x * 0.85, 1.1 * s.y * 0.8, 1.4 * s.z * 0.85),
-					yaw
-				)
+				col = {
+					"shape": 1,
+					"size": Vector3(1.8 * s.x * 0.85, 1.1 * s.y * 0.8, 1.4 * s.z * 0.85),
+					"yaw": yaw,
+				}
 			_:
-				_add_sphere_body(rock_colliders, origin, maxf(s.x, s.z) * 0.55)
+				col = {"shape": 0, "radius": maxf(s.x, s.z) * 0.55}
+		_streamer.call("add_rock", Transform3D(basis, origin), k, col)
 
 
-func _build_bushes() -> void:
-	# Kenney Nature Kit shrubs + a few flowers (replaces green sphere placeholders).
+func _prepare_bush_chunks() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value + 99
-
-	var bush_files := [
-		"plant_bush.glb", "plant_bushDetailed.glb",
-		"plant_bushLarge.glb", "plant_bushSmall.glb", "plant_bushTriangle.glb",
-	]
-	var flower_files := [
-		"flower_purpleA.glb", "flower_purpleB.glb",
-		"flower_yellowA.glb", "flower_yellowB.glb",
-		"flower_redA.glb", "flower_redB.glb",
-	]
-
-	var bush_meshes: Array[Mesh] = []
+	if _streamer == null:
+		return
+	await get_tree().process_frame
+	_load_bush_and_flower_meshes()
 	var bush_h: Array[float] = []
-	for file_name in bush_files:
-		var mesh := _load_glb_mesh("res://assets/kenney_plants/%s" % file_name)
-		if mesh == null:
-			continue
-		bush_meshes.append(mesh)
+	for mesh in _sm_bushes:
 		bush_h.append(maxf(mesh.get_aabb().size.y, 0.08))
-	if bush_meshes.is_empty():
+	if _sm_bushes.is_empty():
 		push_warning("No Kenney bush models loaded")
 		return
-
-	var count := 420
-	var positions := _sample_positions(count, 5.0, 12.0, rng)
-	var type_of: Array[int] = []
-	type_of.resize(positions.size())
-	var type_counts: Array[int] = []
-	type_counts.resize(bush_meshes.size())
-	type_counts.fill(0)
-	for i in positions.size():
-		var t := rng.randi_range(0, bush_meshes.size() - 1)
-		type_of[i] = t
-		type_counts[t] += 1
-
-	var mms: Array[MultiMeshInstance3D] = []
-	for i in bush_meshes.size():
-		mms.append(_make_multimesh("KenneyBush_%d" % i, bush_meshes[i], type_counts[i], null))
-
-	var bush_colliders := Node3D.new()
-	bush_colliders.name = "BushColliders"
-	add_child(bush_colliders)
-
-	var writes: Array[int] = []
-	writes.resize(bush_meshes.size())
-	writes.fill(0)
+	var positions := _sample_positions(420, 5.0, 12.0, rng, 5.0)
 	for i in positions.size():
 		var p: Vector3 = positions[i]
-		var t: int = type_of[i]
-		var wi: int = writes[t]
-		writes[t] = wi + 1
+		var t := rng.randi_range(0, _sm_bushes.size() - 1)
 		var target_h := rng.randf_range(0.7, 1.9)
 		var s := target_h / bush_h[t]
 		var sxz := s * rng.randf_range(0.9, 1.2)
 		var yaw := rng.randf_range(0.0, TAU)
 		var basis := Basis(Vector3.UP, yaw).scaled(Vector3(sxz, s, sxz))
-		mms[t].multimesh.set_instance_transform(wi, Transform3D(basis, p))
-		_add_sphere_body(bush_colliders, p + Vector3(0.0, target_h * 0.35, 0.0), target_h * 0.28)
-
-	# Sparse flowers for color near paths / clearings.
-	var flower_meshes: Array[Mesh] = []
+		_streamer.call("add_bush", Transform3D(basis, p), t, target_h * 0.28)
+	await get_tree().process_frame
 	var flower_h: Array[float] = []
-	for file_name in flower_files:
-		var mesh := _load_glb_mesh("res://assets/kenney_plants/%s" % file_name)
-		if mesh == null:
-			continue
-		flower_meshes.append(mesh)
+	for mesh in _sm_flowers:
 		flower_h.append(maxf(mesh.get_aabb().size.y, 0.05))
-	if flower_meshes.is_empty():
+	if _sm_flowers.is_empty():
 		return
-	var flower_pos := _sample_positions(280, 4.0, 8.0, rng)
-	var f_type: Array[int] = []
-	f_type.resize(flower_pos.size())
-	var f_counts: Array[int] = []
-	f_counts.resize(flower_meshes.size())
-	f_counts.fill(0)
-	for i in flower_pos.size():
-		var t := rng.randi_range(0, flower_meshes.size() - 1)
-		f_type[i] = t
-		f_counts[t] += 1
-	var f_mms: Array[MultiMeshInstance3D] = []
-	for i in flower_meshes.size():
-		f_mms.append(_make_multimesh("KenneyFlower_%d" % i, flower_meshes[i], f_counts[i], null))
-	var f_writes: Array[int] = []
-	f_writes.resize(flower_meshes.size())
-	f_writes.fill(0)
+	var flower_pos := _sample_positions(280, 4.0, 8.0, rng, 4.0)
 	for i in flower_pos.size():
 		var p: Vector3 = flower_pos[i]
-		var t: int = f_type[i]
-		var wi: int = f_writes[t]
-		f_writes[t] = wi + 1
+		var t := rng.randi_range(0, _sm_flowers.size() - 1)
 		var target_h := rng.randf_range(0.25, 0.55)
 		var s := target_h / flower_h[t]
 		var yaw := rng.randf_range(0.0, TAU)
 		var basis := Basis(Vector3.UP, yaw).scaled(Vector3(s, s, s))
-		f_mms[t].multimesh.set_instance_transform(wi, Transform3D(basis, p))
+		_streamer.call("add_flower", Transform3D(basis, p), t)
 
 
 func _animal_target_height(file_name: String, rng: RandomNumberGenerator) -> float:
 	match file_name:
-		"animal-elephant.glb", "animal-giraffe.glb":
-			return rng.randf_range(2.4, 3.2)
 		"animal-deer.glb", "animal-cow.glb", "animal-polar.glb", "animal-tiger.glb", "animal-lion.glb":
 			return rng.randf_range(1.15, 1.55)
 		"animal-hog.glb", "animal-pig.glb", "animal-dog.glb", "animal-fox.glb", "animal-monkey.glb", "animal-panda.glb":
 			return rng.randf_range(0.75, 1.15)
 		"animal-bunny.glb", "animal-cat.glb", "animal-chick.glb", "animal-beaver.glb", "animal-koala.glb", "animal-penguin.glb":
 			return rng.randf_range(0.4, 0.7)
-		"animal-bee.glb", "animal-parrot.glb", "animal-crab.glb", "animal-caterpillar.glb", "animal-fish.glb":
+		"animal-bee.glb", "animal-parrot.glb", "animal-crab.glb":
 			return rng.randf_range(0.25, 0.45)
 		_:
 			return rng.randf_range(0.7, 1.2)
@@ -2039,26 +2527,22 @@ func _collect_mesh_aabbs_local(node: Node, parent_xf: Transform3D, out: Array[AA
 		_collect_mesh_aabbs_local(child, xf, out)
 
 
-func _spawn_critter(
-	parent: Node3D,
-	res_path: String,
-	pos: Vector3,
-	target_h: float,
-	yaw: float,
-	kind: int,
-	file_name: String,
-	ai_script: Script
-) -> void:
+func stream_spawn_critter(spawn: Dictionary, ai_script: Script) -> Node:
+	var res_path := str(spawn.get("path", ""))
+	var pos: Vector3 = spawn.get("pos", Vector3.ZERO)
+	var target_h := float(spawn.get("height", 1.2))
+	var yaw := float(spawn.get("yaw", 0.0))
+	var kind := int(spawn.get("kind", 0))
+	var file_name := str(spawn.get("name", ""))
 	var inst := _instantiate_glb_scene(res_path)
 	if inst.is_empty() or inst.get("root") == null:
-		return
+		return null
 	var scene_root: Node3D = inst["root"]
 	var native_h: float = float(inst["native_h"])
 	var feet_y_min: float = float(inst["feet_y_min"])
 	var size_x: float = float(inst["size_x"])
 	var size_z: float = float(inst["size_z"])
 	var s := target_h / maxf(native_h, 0.05)
-	# Rest-pose sole offset (live AABB snap in critter_ai does the final plant).
 	var y_off := -feet_y_min * s
 	var body := CharacterBody3D.new()
 	body.set_script(ai_script)
@@ -2078,7 +2562,6 @@ func _spawn_critter(
 	elif file_name.find("ghost") >= 0:
 		body.hover_height = 0.55
 		body.chase_speed = 2.9
-	# Collision matches scaled visual footprint (box for wide pets, capsule for bipeds).
 	var col := CollisionShape3D.new()
 	var world_x := size_x * s
 	var world_z := size_z * s
@@ -2102,18 +2585,14 @@ func _spawn_critter(
 	body.add_child(col)
 	body.home = pos
 	body.setup_scene(scene_root, s, y_off, yaw)
-	parent.add_child(body)
-	body.home = body.global_position
+	return body
 
 
-func _build_animals() -> void:
-	# Kenney Cube Pets with walk/run clips + wander/flee AI.
+func _prepare_actor_spawns() -> void:
+	if _streamer == null:
+		return
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value + 707
-	var ai_script := load("res://scripts/critter_ai.gd") as Script
-	if ai_script == null:
-		push_warning("critter_ai.gd missing")
-		return
 	var animal_files := [
 		"animal-deer.glb", "animal-fox.glb", "animal-bunny.glb", "animal-hog.glb",
 		"animal-bee.glb", "animal-chick.glb", "animal-cat.glb", "animal-dog.glb",
@@ -2125,74 +2604,97 @@ func _build_animals() -> void:
 	var names: Array[String] = []
 	for file_name in animal_files:
 		var res_path := "res://assets/kenney_animals/%s" % file_name
-		var probe := _instantiate_glb_scene(res_path)
-		if probe.is_empty():
+		# Existence check only ? instantiating every model here used to stall load.
+		if not ResourceLoader.exists(res_path):
 			continue
-		# Probe only warms the template cache; discard the unused duplicate.
-		(probe["root"] as Node).free()
 		paths.append(res_path)
 		names.append(file_name)
-	if paths.is_empty():
-		push_warning("No Kenney animal models loaded")
-		return
-
-	var positions := _sample_positions_random(animal_count, 6.0, 12.0, rng, 0.18, 80.0)
-
-	var root := Node3D.new()
-	root.name = "Animals"
-	add_child(root)
-
-	for i in positions.size():
-		var t: int
-		if rng.randf() < 0.7:
-			t = rng.randi_range(0, mini(11, paths.size() - 1))
-		else:
-			t = rng.randi_range(0, paths.size() - 1)
-		var target_h := _animal_target_height(names[t], rng)
-		_spawn_critter(
-			root, paths[t], positions[i], target_h,
-			rng.randf_range(0.0, TAU), 0, names[t], ai_script
-		)
-
-
-func _build_monsters() -> void:
-	# Kenney Graveyard Kit undead with walk/sprint clips + chase AI.
-	var rng := RandomNumberGenerator.new()
+	_map_actor_markers.clear()
+	if not paths.is_empty():
+		var positions := _sample_positions_random(animal_count, 6.0, 12.0, rng, 0.0, 0.0, 18.0)
+		for i in positions.size():
+			var t := rng.randi_range(0, paths.size() - 1)
+			var pos: Vector3 = positions[i]
+			_streamer.call("add_actor", {
+				"id": "animal_%d" % i,
+				"kind": 0,
+				"path": paths[t],
+				"pos": pos,
+				"yaw": rng.randf_range(0.0, TAU),
+				"height": _animal_target_height(names[t], rng),
+				"name": names[t],
+			})
+			_map_actor_markers.append({"x": pos.x, "z": pos.z, "kind": 0})
+	await get_tree().process_frame
 	rng.seed = seed_value + 909
-	var ai_script := load("res://scripts/critter_ai.gd") as Script
-	if ai_script == null:
-		push_warning("critter_ai.gd missing")
-		return
 	var monster_files := [
 		"character-zombie.glb",
 		"character-skeleton.glb",
 		"character-vampire.glb",
 		"character-ghost.glb",
 	]
-	var paths: Array[String] = []
-	var names: Array[String] = []
+	paths.clear()
+	names.clear()
 	for file_name in monster_files:
 		var res_path := "res://assets/kenney_monsters/%s" % file_name
-		var probe := _instantiate_glb_scene(res_path)
-		if probe.is_empty():
+		if not ResourceLoader.exists(res_path):
 			continue
-		(probe["root"] as Node).free()
 		paths.append(res_path)
 		names.append(file_name)
 	if paths.is_empty():
-		push_warning("No Kenney monster models loaded")
 		return
-
-	var positions := _sample_positions_random(monster_count, 8.0, 20.0, rng, 0.15, 90.0)
-
-	var root := Node3D.new()
-	root.name = "Monsters"
-	add_child(root)
-
-	for i in positions.size():
+	var mpos := _sample_positions_random(monster_count, 8.0, 20.0, rng, 0.0, 0.0, 28.0)
+	for i in mpos.size():
 		var t := rng.randi_range(0, paths.size() - 1)
-		var target_h := rng.randf_range(1.55, 1.95)
-		_spawn_critter(
-			root, paths[t], positions[i], target_h,
-			rng.randf_range(0.0, TAU), 1, names[t], ai_script
-		)
+		var pos2: Vector3 = mpos[i]
+		_streamer.call("add_actor", {
+			"id": "monster_%d" % i,
+			"kind": 1,
+			"path": paths[t],
+			"pos": pos2,
+			"yaw": rng.randf_range(0.0, TAU),
+			"height": rng.randf_range(1.55, 1.95),
+			"name": names[t],
+		})
+		_map_actor_markers.append({"x": pos2.x, "z": pos2.z, "kind": 1})
+
+
+func _prepare_treasure_spawns() -> void:
+	if _streamer == null:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value + 515
+	var defs: Array[Dictionary] = [
+		{"id": "gem", "name": "\u73ca\u740a\u77f3", "desc": "\u6797\u95f4\u95ea\u8000\u7684\u5b9d\u77f3", "color": Color(0.95, 0.72, 0.18)},
+		{"id": "coin", "name": "\u53e4\u5e01", "desc": "\u751f\u950b\u73b0\u4e00\u89d2\u7684\u91d1\u5e01", "color": Color(0.85, 0.7, 0.25)},
+		{"id": "feather", "name": "\u5f69\u7fbd", "desc": "\u4ece\u9ad8\u5904\u843d\u4e0b\u7684\u7f8e\u4e3d\u7fbd\u6bdb", "color": Color(0.35, 0.75, 0.95)},
+		{"id": "crystal", "name": "\u6c34\u6676", "desc": "\u51b7\u51bb\u7684\u84dd\u8272\u6c34\u6676", "color": Color(0.35, 0.55, 1.0)},
+		{"id": "relic", "name": "\u9057\u7269", "desc": "\u53e4\u8001\u7684\u795e\u79d8\u9057\u7269", "color": Color(0.65, 0.42, 0.22)},
+	]
+	var positions := _sample_positions_random(treasure_count, 12.0, 22.0, rng, 0.0, 0.0, 36.0)
+	_map_treasure_markers.clear()
+	var placed := 0
+	for i in positions.size():
+		var pid := "treasure_%d" % i
+		if _collected_pickups.has(pid):
+			continue
+		var def: Dictionary = defs[i % defs.size()]
+		var p: Vector3 = positions[i]
+		var pos := Vector3(p.x, p.y + 0.05, p.z)
+		_streamer.call("add_treasure", {
+			"id": pid,
+			"item_id": str(def["id"]),
+			"item_name": str(def["name"]),
+			"item_desc": str(def["desc"]),
+			"item_color": def["color"],
+			"amount": 1,
+			"pos": pos,
+		})
+		_map_treasure_markers.append({
+			"id": pid,
+			"x": pos.x,
+			"z": pos.z,
+			"name": str(def["name"]),
+		})
+		placed += 1
+	print("Treasures prepared: ", placed)

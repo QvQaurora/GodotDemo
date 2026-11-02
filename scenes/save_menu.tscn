@@ -1,0 +1,52 @@
+[gd_scene load_steps=2 format=3 uid="uid://csavemenuforest"]
+
+[ext_resource type="Script" path="res://scripts/save_menu.gd" id="1_save"]
+
+[node name="SaveMenu" type="VBoxContainer"]
+custom_minimum_size = Vector2(480, 420)
+theme_override_constants/separation = 12
+script = ExtResource("1_save")
+
+[node name="Title" type="Label" parent="."]
+theme_override_font_sizes/font_size = 26
+text = "存档"
+horizontal_alignment = 1
+
+[node name="Status" type="Label" parent="."]
+modulate = Color(0.75, 0.85, 0.75, 1)
+horizontal_alignment = 1
+text = ""
+
+[node name="SlotList" type="VBoxContainer" parent="."]
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="Actions" type="HBoxContainer" parent="."]
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="SaveButton" type="Button" parent="Actions"]
+custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
+text = "保存"
+
+[node name="LoadButton" type="Button" parent="Actions"]
+custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
+text = "加载"
+
+[node name="DeleteButton" type="Button" parent="Actions"]
+custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
+text = "删除"
+
+[node name="BackButton" type="Button" parent="Actions"]
+custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
+text = "返回"
+
+[node name="ConfirmDelete" type="ConfirmationDialog" parent="."]
+title = "删除存档"
+ok_button_text = "删除"
+cancel_button_text = "取消"
+dialog_text = "确定删除该存档？此操作无法撤销。"

@@ -1,5 +1,5 @@
 extends CanvasLayer
-## Tab backpack: grid inventory with starter forest supplies.
+## Tab backpack: empty grid inventory (filled via gameplay / save).
 
 const COLS := 5
 const ROWS := 4
@@ -77,19 +77,15 @@ func toggle() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# Before GUI — Tab must close backpack even if a Control would steal focus.
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
 	var key := event as InputEventKey
-	var is_tab := (
-		key.keycode == KEY_TAB
-		or key.physical_keycode == KEY_TAB
-		or key.is_action_pressed("ui_focus_next")
-		or key.is_action_pressed("ui_focus_prev")
-	)
-	if is_tab:
+	if GameSettings.matches_action("inventory", event):
 		if get_tree().paused and not _open:
 			return
+		var map_ui := get_tree().get_first_node_in_group("world_map_ui")
+		if map_ui != null and map_ui.has_method("is_open") and bool(map_ui.call("is_open")):
+			map_ui.call("close_map")
 		toggle()
 		get_viewport().set_input_as_handled()
 		return
@@ -102,25 +98,85 @@ func _init_slots() -> void:
 	_slots.clear()
 	_slots.resize(SLOT_COUNT)
 	_slots.fill(null)
-	_put(0, "wood", "木柴", 5, "干燥的树枝，可生火或搭建。", Color(0.55, 0.35, 0.18))
-	_put(1, "berry", "浆果", 8, "森林里摘到的浆果，能稍微恢复体力。", Color(0.72, 0.18, 0.32))
-	_put(2, "water", "水瓶", 2, "干净的饮水，走远路时很重要。", Color(0.25, 0.55, 0.85))
-	_put(3, "rope", "绳子", 1, "结实的麻绳，捆东西或攀爬用。", Color(0.72, 0.62, 0.38))
-	_put(4, "herb", "草药", 3, "带清香的草叶，据说能止血。", Color(0.28, 0.62, 0.32))
-	_put(5, "stone", "石块", 4, "趁手的石头，敲打或砸开硬壳。", Color(0.55, 0.55, 0.52))
-	_put(6, "map", "手绘地图", 1, "标注了小路与池塘的粗糙地图。", Color(0.85, 0.78, 0.55))
 
 
-func _put(index: int, id: String, item_name: String, count: int, desc: String, color: Color) -> void:
-	if index < 0 or index >= SLOT_COUNT:
+func clear_all() -> void:
+	_init_slots()
+	_selected = -1
+	_set_detail(-1)
+	if not _slot_buttons.is_empty():
+		_refresh_grid()
+
+
+func get_save_data() -> Array:
+	var out: Array = []
+	out.resize(SLOT_COUNT)
+	for i in SLOT_COUNT:
+		var item = _slots[i]
+		if item == null:
+			out[i] = null
+			continue
+		var c: Color = item["color"]
+		out[i] = {
+			"id": str(item["id"]),
+			"name": str(item["name"]),
+			"count": int(item["count"]),
+			"desc": str(item["desc"]),
+			"color": [c.r, c.g, c.b, c.a],
+		}
+	return out
+
+
+func add_item(id: String, item_name: String, count: int, desc: String, color: Color) -> bool:
+	# Stack into existing slot with same id, else first empty slot.
+	for i in SLOT_COUNT:
+		var item = _slots[i]
+		if item != null and str(item["id"]) == id:
+			item["count"] = int(item["count"]) + count
+			_slots[i] = item
+			_refresh_grid()
+			return true
+	for i in SLOT_COUNT:
+		if _slots[i] == null:
+			_slots[i] = {
+				"id": id,
+				"name": item_name,
+				"count": count,
+				"desc": desc,
+				"color": color,
+			}
+			_refresh_grid()
+			return true
+	return false
+
+
+func apply_save_data(data: Variant) -> void:
+	_init_slots()
+	if typeof(data) != TYPE_ARRAY:
+		_refresh_grid()
 		return
-	_slots[index] = {
-		"id": id,
-		"name": item_name,
-		"count": count,
-		"desc": desc,
-		"color": color,
-	}
+	var arr := data as Array
+	for i in mini(SLOT_COUNT, arr.size()):
+		var item = arr[i]
+		if item == null or typeof(item) != TYPE_DICTIONARY:
+			continue
+		var d := item as Dictionary
+		var col := Color(0.7, 0.7, 0.7)
+		if d.has("color") and typeof(d["color"]) == TYPE_ARRAY:
+			var ca: Array = d["color"]
+			if ca.size() >= 3:
+				col = Color(float(ca[0]), float(ca[1]), float(ca[2]), float(ca[3]) if ca.size() > 3 else 1.0)
+		_slots[i] = {
+			"id": str(d.get("id", "")),
+			"name": str(d.get("name", "")),
+			"count": int(d.get("count", 1)),
+			"desc": str(d.get("desc", "")),
+			"color": col,
+		}
+	_selected = -1
+	_set_detail(-1)
+	if not _slot_buttons.is_empty():
+		_refresh_grid()
 
 
 func _build_grid() -> void:

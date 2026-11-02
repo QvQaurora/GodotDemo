@@ -3,19 +3,34 @@ extends CharacterBody3D
 
 @export var walk_speed: float = 5.5
 @export var run_speed: float = 11.0
-@export var jump_velocity: float = 8.5
-@export var gravity_scale: float = 2.8
+@export var jump_velocity: float = 8.8
+@export var gravity_scale: float = 2.35
 @export var look_sensitivity: float = 0.0025
 @export var min_pitch: float = -1.2
 @export var max_pitch: float = 0.55
 @export var character_path: String = "res://assets/kenney_characters/characterMedium.fbx"
 @export var skin_path: String = "res://assets/kenney_characters/Skins/skaterMaleA.png"
 @export var character_height: float = 1.8
+@export var attack_range: float = 2.2
+@export var attack_radius: float = 1.05
+@export var attack_damage: float = 1.0
+@export var attack_cooldown: float = 0.45
+@export var hp_max: float = 100.0
+
+signal health_changed(hp: float, hp_max: float)
 
 var gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
+var hp: float = 100.0
 var _jump_pressed: bool = false
+var _attack_pressed: bool = false
+var _attack_t: float = -1.0
+var _attack_hit_done: bool = false
+var _attack_cd: float = 0.0
+var _hurt_cd: float = 0.0
 var _air_height: float = 0.0
 var _air_vel: float = 0.0
+var _dead: bool = false
+var _death_t: float = -1.0
 ## When false (inside a house), Y is not forced to outdoor terrain height.
 var stick_to_terrain: bool = true
 
@@ -50,15 +65,187 @@ func _ready() -> void:
 	floor_snap_length = 0.0
 	camera.current = true
 	_pivot_base_x = pivot.rotation.x
+	hp = hp_max
 	_load_kenney_character()
 	_apply_camera_mode()
 	if get_tree().paused:
 		get_tree().paused = false
-	call_deferred("_snap_to_ground")
+	# Save restore (if any) runs from GameWorld after forest height is ready.
+	if not GameSave.pending_load:
+		call_deferred("_snap_to_ground")
 	if DisplayServer.window_is_focused():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		DisplayServer.window_set_ime_active(false)
 	else:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	call_deferred("_emit_health")
+
+
+func take_damage(amount: float) -> void:
+	if amount <= 0.0 or hp <= 0.0 or _dead:
+		return
+	if _hurt_cd > 0.0:
+		return
+	hp = maxf(hp - amount, 0.0)
+	_hurt_cd = 0.35
+	_emit_health()
+	if hp <= 0.0:
+		_begin_death()
+
+
+func heal(amount: float) -> void:
+	if amount <= 0.0 or _dead:
+		return
+	hp = minf(hp + amount, hp_max)
+	_emit_health()
+
+
+func _emit_health() -> void:
+	health_changed.emit(hp, hp_max)
+
+
+func is_dead() -> bool:
+	return _dead
+
+
+func _begin_death() -> void:
+	if _dead:
+		return
+	_dead = true
+	_death_t = 0.0
+	_jump_pressed = false
+	_attack_pressed = false
+	_attack_t = -1.0
+	velocity = Vector3.ZERO
+	_air_height = 0.0
+	_air_vel = 0.0
+	# Prefer third person so the fall is visible.
+	if _cam_mode == CamMode.FIRST:
+		_cam_mode = CamMode.THIRD
+		_apply_camera_mode()
+	if _anim != null and _anim.has_animation("idle"):
+		_current_anim = "idle"
+		_anim.speed_scale = 0.35
+		_anim.play("idle", 0.05)
+
+
+func _update_death(delta: float) -> void:
+	_death_t += delta
+	velocity = Vector3.ZERO
+	if stick_to_terrain:
+		move_and_slide()
+		global_position.y = _terrain_y() + FEET_CLEARANCE
+	else:
+		move_and_slide()
+	# Fall backward onto the ground (pivot at feet). Slight lift avoids clipping.
+	if model != null:
+		var lean := clampf(_death_t / 0.55, 0.0, 1.0)
+		lean = lean * lean * (3.0 - 2.0 * lean)
+		model.rotation.x = lean * deg_to_rad(82.0)
+		model.rotation.z = 0.0
+		model.position.y = lean * 0.34
+	if _death_t >= 1.75:
+		_respawn_random()
+
+
+func _respawn_random() -> void:
+	var pos := _pick_respawn_position()
+	_dead = false
+	_death_t = -1.0
+	hp = hp_max
+	_hurt_cd = 1.0
+	_emit_health()
+	stick_to_terrain = true
+	_air_height = 0.0
+	_air_vel = 0.0
+	velocity = Vector3.ZERO
+	if model != null:
+		model.rotation = Vector3(0.0, _model_yaw, 0.0)
+		model.position.y = 0.0
+	global_position = pos
+	if _anim != null:
+		_anim.speed_scale = 1.0
+		_play_anim("idle", 1.0)
+	# Nudge streamer to rebuild around the new spot.
+	var forest := get_tree().get_first_node_in_group("forest_world")
+	if forest != null and forest.has_method("refresh_world_stream"):
+		forest.call("refresh_world_stream")
+
+
+func _pick_respawn_position() -> Vector3:
+	var forest := get_tree().get_first_node_in_group("forest_world")
+	var half := 420.0
+	if forest != null and "terrain_size" in forest:
+		half = maxf(float(forest.get("terrain_size")) * 0.5 - 50.0, 80.0)
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	for _i in 48:
+		var x := rng.randf_range(-half, half)
+		var z := rng.randf_range(-half, half)
+		var candidate := Vector3(x, 0.0, z)
+		if forest != null and forest.has_method("is_blocked_for_critter"):
+			if bool(forest.call("is_blocked_for_critter", candidate, 3.5)):
+				continue
+		elif forest != null and forest.has_method("_blocked"):
+			if bool(forest.call("_blocked", candidate, 3.5)):
+				continue
+		var y := 0.0
+		if forest != null and forest.has_method("get_terrain_height"):
+			y = float(forest.call("get_terrain_height", x, z))
+		return Vector3(x, y + FEET_CLEARANCE, z)
+	# Fallback near origin.
+	var fy := _terrain_y()
+	return Vector3(0.0, fy + FEET_CLEARANCE, 0.0)
+
+
+func get_facing_yaw() -> float:
+	## Camera/look yaw on the map (not mesh turn — idle strafe would point the wrong way).
+	var fwd := -global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length_squared() < 0.0001:
+		return rotation.y
+	fwd = fwd.normalized()
+	# Match map: yaw 0 = -Z (north / up on map).
+	return atan2(fwd.x, -fwd.z)
+
+
+func get_save_data() -> Dictionary:
+	return {
+		"x": global_position.x,
+		"z": global_position.z,
+		"yaw": rotation.y,
+		"pivot_x": pivot.rotation.x,
+		"cam_mode": int(_cam_mode),
+		"model_yaw": _model_yaw,
+		"hp": hp,
+		"hp_max": hp_max,
+	}
+
+
+func apply_save_data(data: Variant) -> void:
+	if typeof(data) != TYPE_DICTIONARY:
+		_snap_to_ground()
+		return
+	var d := data as Dictionary
+	var x := float(d.get("x", global_position.x))
+	var z := float(d.get("z", global_position.z))
+	rotation.y = float(d.get("yaw", rotation.y))
+	pivot.rotation.x = clampf(float(d.get("pivot_x", pivot.rotation.x)), min_pitch, max_pitch)
+	_model_yaw = float(d.get("model_yaw", 0.0))
+	if model != null:
+		model.rotation.y = _model_yaw
+	var mode := int(d.get("cam_mode", CamMode.THIRD))
+	_cam_mode = CamMode.FIRST if mode == CamMode.FIRST else CamMode.THIRD
+	_apply_camera_mode()
+	# Always restore outdoors on terrain — house interior state is not persisted.
+	stick_to_terrain = true
+	_air_height = 0.0
+	_air_vel = 0.0
+	velocity = Vector3.ZERO
+	global_position = Vector3(x, _terrain_y() + FEET_CLEARANCE, z)
+	hp_max = float(d.get("hp_max", hp_max))
+	hp = clampf(float(d.get("hp", hp_max)), 0.0, hp_max)
+	_emit_health()
 
 
 func _notification(what: int) -> void:
@@ -87,7 +274,12 @@ func _snap_to_ground() -> void:
 
 func _inventory_blocks_play() -> bool:
 	var inv := get_tree().get_first_node_in_group("inventory_ui")
-	return inv != null and inv.has_method("is_open") and bool(inv.call("is_open"))
+	if inv != null and inv.has_method("is_open") and bool(inv.call("is_open")):
+		return true
+	var map_ui := get_tree().get_first_node_in_group("world_map_ui")
+	if map_ui != null and map_ui.has_method("is_open") and bool(map_ui.call("is_open")):
+		return true
+	return false
 
 
 func _cycle_camera_mode() -> void:
@@ -134,7 +326,7 @@ func _apply_camera_mode() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if get_tree().paused or _inventory_blocks_play():
+	if get_tree().paused or _inventory_blocks_play() or _dead:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var sens := look_sensitivity * GameSettings.mouse_sensitivity
@@ -142,7 +334,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		pivot.rotate_x(-event.relative.y * sens)
 		pivot.rotation.x = clampf(pivot.rotation.x, min_pitch, max_pitch)
 	elif event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_SPACE:
+		if GameSettings.matches_action("jump", event):
 			_jump_pressed = true
 		elif event.keycode == KEY_U:
 			_cycle_camera_mode()
@@ -150,18 +342,33 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if DisplayServer.window_is_focused() and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+			DisplayServer.window_set_ime_active(false)
+		else:
+			_attack_pressed = true
+			get_viewport().set_input_as_handled()
 
 
 func _physics_process(delta: float) -> void:
 	if get_tree().paused:
 		return
+	_attack_cd = maxf(_attack_cd - delta, 0.0)
+	_hurt_cd = maxf(_hurt_cd - delta, 0.0)
+	if _dead:
+		_update_death(delta)
+		return
 	if _inventory_blocks_play():
+		_attack_pressed = false
 		velocity = Vector3.ZERO
 		if stick_to_terrain:
 			move_and_slide()
 			global_position.y = _terrain_y() + FEET_CLEARANCE + _air_height
 		_update_animation(false)
 		return
+
+	if _attack_pressed and _attack_t < 0.0 and _attack_cd <= 0.0:
+		_begin_attack()
+	_attack_pressed = false
+	_update_attack(delta)
 
 	var input_dir := Vector2.ZERO
 	if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
@@ -180,7 +387,7 @@ func _physics_process(delta: float) -> void:
 	if direction.length_squared() > 0.0001:
 		direction = direction.normalized()
 
-	var running := Input.is_physical_key_pressed(KEY_SHIFT)
+	var running := GameSettings.action_held("sprint")
 	var target_speed := run_speed if running else walk_speed
 
 	if direction != Vector3.ZERO:
@@ -240,6 +447,109 @@ func _process(_delta: float) -> void:
 	# After AnimationPlayer pose update: keep head collapsed in first person.
 	if _cam_mode == CamMode.FIRST:
 		_set_first_person_head_hidden(true)
+	if _attack_t >= 0.0:
+		_apply_attack_arm_pose()
+
+
+func _begin_attack() -> void:
+	## Keep current facing — do not snap the mesh toward the camera.
+	_attack_t = 0.0
+	_attack_hit_done = false
+	_attack_cd = attack_cooldown
+
+
+func _update_attack(delta: float) -> void:
+	if _attack_t < 0.0:
+		return
+	_attack_t += delta
+	# Hit frame near the punch apex.
+	if not _attack_hit_done and _attack_t >= 0.14:
+		_attack_hit_done = true
+		_deal_attack_hits()
+	if _attack_t >= 0.36:
+		_attack_t = -1.0
+
+
+func _attack_forward() -> Vector3:
+	## Prefer the mesh facing (third person can strafe while looking elsewhere).
+	var forward := Vector3.FORWARD
+	if model != null:
+		forward = -model.global_transform.basis.z
+	else:
+		forward = -global_transform.basis.z
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		return Vector3.FORWARD
+	return forward.normalized()
+
+
+func _deal_attack_hits() -> void:
+	var space := get_world_3d().direct_space_state
+	if space == null:
+		return
+	var sphere := SphereShape3D.new()
+	sphere.radius = attack_radius
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = sphere
+	query.collision_mask = 4 # critter layer
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	var forward := _attack_forward()
+	var origin := global_position + Vector3(0.0, 1.05, 0.0) + forward * (attack_range * 0.55)
+	query.transform = Transform3D(Basis(), origin)
+	var hits := space.intersect_shape(query, 12)
+	var struck: Dictionary = {}
+	for hit in hits:
+		var col: Object = hit.get("collider")
+		if col == null or not is_instance_valid(col):
+			continue
+		var id := col.get_instance_id()
+		if struck.has(id):
+			continue
+		struck[id] = true
+		if col.has_method("apply_player_hit"):
+			col.call("apply_player_hit", global_position, attack_damage)
+
+
+func _apply_attack_arm_pose() -> void:
+	## Additive offsets on top of idle/run — only the right arm, no torso overwrite.
+	if _skeleton == null or _attack_t < 0.0:
+		return
+	var u := clampf(_attack_t / 0.36, 0.0, 1.0)
+	# Envelope: pull back → extend → recover.
+	var pull := 0.0
+	var extend := 0.0
+	if u < 0.28:
+		pull = u / 0.28
+	elif u < 0.55:
+		pull = 1.0 - ((u - 0.28) / 0.27)
+		extend = (u - 0.28) / 0.27
+	else:
+		extend = 1.0 - ((u - 0.55) / 0.45)
+	pull = clampf(pull, 0.0, 1.0)
+	extend = clampf(extend, 0.0, 1.0)
+	# Local bone deltas (Kenney Mixamo-style right arm).
+	_add_bone_euler("RightArm", Vector3(
+		deg_to_rad(-55.0 * extend + 25.0 * pull),
+		deg_to_rad(-20.0 * extend),
+		deg_to_rad(12.0 * pull - 8.0 * extend)
+	))
+	_add_bone_euler("RightForeArm", Vector3(
+		deg_to_rad(-70.0 * pull + 35.0 * extend),
+		0.0,
+		deg_to_rad(8.0 * extend)
+	))
+	_add_bone_euler("RightHand", Vector3(deg_to_rad(-15.0 * extend), 0.0, 0.0))
+
+
+func _add_bone_euler(bone_name: String, euler: Vector3) -> void:
+	if _skeleton == null:
+		return
+	var bi := _skeleton.find_bone(bone_name)
+	if bi < 0:
+		return
+	var cur := _skeleton.get_bone_pose_rotation(bi)
+	_skeleton.set_bone_pose_rotation(bi, cur * Quaternion.from_euler(euler))
 
 
 func _face_move_direction(world_dir: Vector3, delta: float) -> void:

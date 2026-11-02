@@ -105,7 +105,7 @@ func _make_interior(room_size: Vector3) -> Node3D:
 
 	# Front / back walls with a doorway gap in the middle (exit via E at the gap).
 	for z_sign in [-1.0, 1.0]:
-		var z := z_sign * (inner.z * 0.5 - wall_t * 0.5)
+		var z: float = float(z_sign) * (inner.z * 0.5 - wall_t * 0.5)
 		var left_x := -gap * 0.5 - side_w * 0.5
 		var right_x := gap * 0.5 + side_w * 0.5
 		_add_box_mesh(root, Vector3(left_x, h * 0.5, z), Vector3(side_w, h, wall_t), wall_mat)
@@ -170,6 +170,7 @@ func _set_door_blockers(enabled: bool) -> void:
 
 
 func _update_hints() -> void:
+	var key_name := GameSettings.action_label("interact")
 	for i in door_hints.size():
 		var hint := door_hints[i]
 		if hint == null:
@@ -178,7 +179,7 @@ func _update_hints() -> void:
 			hint.visible = false
 			continue
 		hint.visible = true
-		hint.text = "按 E 出门" if inside else "按 E 进屋"
+		hint.text = ("按 %s 出门" if inside else "按 %s 进屋") % key_name
 
 
 func _on_door_entered(body: Node3D, index: int) -> void:
@@ -206,7 +207,7 @@ func _on_door_exited(body: Node3D, index: int) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if _near_door < 0:
 		return
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
+	if GameSettings.matches_action("interact", event):
 		_toggle_enter()
 		get_viewport().set_input_as_handled()
 

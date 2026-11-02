@@ -1,17 +1,21 @@
-[gd_scene load_steps=10 format=3 uid="uid://bforest1000main"]
+[gd_scene load_steps=13 format=3 uid="uid://bforest1000main"]
 
 [ext_resource type="Script" path="res://scripts/forest_generator.gd" id="1_forest"]
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="2_player"]
 [ext_resource type="PackedScene" path="res://scenes/pause_menu.tscn" id="3_pause"]
 [ext_resource type="Script" path="res://scripts/game_world.gd" id="4_world"]
 [ext_resource type="PackedScene" path="res://scenes/inventory.tscn" id="6_inv"]
+[ext_resource type="PackedScene" path="res://scenes/world_map.tscn" id="7_map"]
+[ext_resource type="Script" path="res://scripts/cloud_layer.gd" id="8_clouds"]
+[ext_resource type="Script" path="res://scripts/player_hud.gd" id="9_hud"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
-sky_top_color = Color(0.35, 0.55, 0.85, 1)
-sky_horizon_color = Color(0.72, 0.82, 0.92, 1)
+sky_top_color = Color(0.28, 0.55, 0.92, 1)
+sky_horizon_color = Color(0.82, 0.9, 0.98, 1)
 ground_bottom_color = Color(0.22, 0.28, 0.18, 1)
 ground_horizon_color = Color(0.55, 0.62, 0.48, 1)
-sun_angle_max = 30.0
+sun_angle_max = 12.0
+sun_curve = 0.06
 
 [sub_resource type="Sky" id="Sky_main"]
 sky_material = SubResource("ProceduralSkyMaterial_sky")
@@ -24,12 +28,30 @@ ambient_light_color = Color(0.55, 0.62, 0.5, 1)
 ambient_light_energy = 0.55
 tonemap_mode = 2
 ssao_enabled = true
+ssao_radius = 1.35
+ssao_intensity = 3.2
+ssao_power = 2.0
+ssao_detail = 0.65
+ssao_horizon = 0.06
+ssao_sharpness = 0.85
+ssao_light_affect = 0.55
 glow_enabled = true
-glow_intensity = 0.35
+glow_intensity = 1.15
+glow_strength = 1.05
+glow_bloom = 0.45
+glow_blend_mode = 1
+glow_hdr_threshold = 0.75
+glow_hdr_scale = 2.2
+glow_hdr_luminance_cap = 12.0
+glow_levels/1 = 1.0
+glow_levels/2 = 1.0
+glow_levels/3 = 0.85
+glow_levels/4 = 0.55
+glow_levels/5 = 0.3
 fog_enabled = true
-fog_light_color = Color(0.7, 0.78, 0.72, 1)
-fog_density = 0.0009
-fog_aerial_perspective = 0.35
+fog_light_color = Color(0.72, 0.8, 0.78, 1)
+fog_density = 0.0007
+fog_aerial_perspective = 0.28
 
 [sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_main"]
 dof_blur_far_enabled = false
@@ -42,9 +64,9 @@ environment = SubResource("Environment_main")
 camera_attributes = SubResource("CameraAttributesPractical_main")
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
-transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 120, 0)
-light_color = Color(1, 0.96, 0.88, 1)
-light_energy = 1.25
+transform = Transform3D(0.86, -0.39, 0.33, 0, 0.65, 0.76, -0.51, -0.65, 0.56, 0, 160, 0)
+light_color = Color(1, 0.97, 0.88, 1)
+light_energy = 1.45
 shadow_enabled = true
 directional_shadow_mode = 2
 directional_shadow_max_distance = 280.0
@@ -57,10 +79,14 @@ light_color = Color(0.65, 0.75, 0.9, 1)
 light_energy = 0.25
 shadow_enabled = false
 
+[node name="CloudLayer" type="Node3D" parent="."]
+script = ExtResource("8_clouds")
+
 [node name="Forest" type="Node3D" parent="."]
 script = ExtResource("1_forest")
 terrain_size = 1000.0
-tree_count = 1400
+tree_count = 2400
+tree_min_spacing = 7.5
 seed_value = 42
 pond_count = 14
 road_width = 10.0
@@ -69,13 +95,22 @@ hill_height = 8.5
 bump_height = 1.8
 micro_bump_height = 0.2
 height_smooth_passes = 3
+mountain_count = 8
+mountain_height = 48.0
+mountain_radius = 95.0
 grass_count = 10000
 grass_tile_meters = 3.5
 ground_normal_scale = 0.9
+treasure_count = 28
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.0, 0)
 
+[node name="PlayerHud" type="CanvasLayer" parent="."]
+script = ExtResource("9_hud")
+
 [node name="Inventory" parent="." instance=ExtResource("6_inv")]
+
+[node name="WorldMap" parent="." instance=ExtResource("7_map")]
 
 [node name="PauseMenu" parent="." instance=ExtResource("3_pause")]
