@@ -478,17 +478,12 @@ func _build_world_bounds() -> void:
 
 
 func _load_glb_mesh(res_path: String) -> Mesh:
-	var abs_path := ProjectSettings.globalize_path(res_path)
-	if not FileAccess.file_exists(abs_path):
-		push_warning("Kenney asset missing: " + abs_path)
+	# Use ResourceLoader so exported builds resolve remapped .scn inside the PCK.
+	var packed := load(res_path) as PackedScene
+	if packed == null:
+		push_warning("Kenney asset missing: " + res_path)
 		return null
-	var doc := GLTFDocument.new()
-	var state := GLTFState.new()
-	var err := doc.append_from_file(abs_path, state)
-	if err != OK:
-		push_warning("Failed to load GLB %s (err=%s)" % [res_path, str(err)])
-		return null
-	var root := doc.generate_scene(state)
+	var root := packed.instantiate()
 	if root == null:
 		return null
 	var found := _find_mesh_recursive(root)
@@ -543,13 +538,7 @@ func _retint_kenney_nature_material(bm: BaseMaterial3D) -> void:
 
 
 func _load_kenney_texture(res_path: String) -> Texture2D:
-	var abs_path := ProjectSettings.globalize_path(res_path)
-	if not FileAccess.file_exists(abs_path):
-		return null
-	var img := Image.load_from_file(abs_path)
-	if img == null or img.is_empty():
-		return null
-	return ImageTexture.create_from_image(img)
+	return load(res_path) as Texture2D
 
 
 func _sample_positions(count: int, margin: float, clear_radius: float, rng: RandomNumberGenerator) -> Array[Vector3]:
@@ -1924,17 +1913,11 @@ var _glb_scene_templates: Dictionary = {} # path -> bounds dict + root
 func _instantiate_glb_scene(res_path: String) -> Dictionary:
 	# Returns { root, native_h, feet_y_min, size_x, size_z } or empty on failure.
 	if not _glb_scene_templates.has(res_path):
-		var abs_path := ProjectSettings.globalize_path(res_path)
-		if not FileAccess.file_exists(abs_path):
-			push_warning("Kenney asset missing: " + abs_path)
+		var packed := load(res_path) as PackedScene
+		if packed == null:
+			push_warning("Kenney asset missing: " + res_path)
 			return {}
-		var doc := GLTFDocument.new()
-		var state := GLTFState.new()
-		var err := doc.append_from_file(abs_path, state)
-		if err != OK:
-			push_warning("Failed to load GLB %s (err=%s)" % [res_path, str(err)])
-			return {}
-		var loaded := doc.generate_scene(state)
+		var loaded := packed.instantiate() as Node3D
 		if loaded == null:
 			return {}
 		_fix_critter_materials(loaded)

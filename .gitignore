@@ -1,9 +1,6 @@
 # Godot
 .godot/
 
-# Local bulk Kenney archive (kept on disk, not for git — too large)
-assets/Kenney/
-
 # Export / build outputs
 build/
 *.exe

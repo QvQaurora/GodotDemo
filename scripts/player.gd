@@ -297,18 +297,12 @@ func _load_kenney_character() -> void:
 	_skeleton = null
 	_head_bones.clear()
 
-	var abs_path := ProjectSettings.globalize_path(character_path)
-	if not FileAccess.file_exists(abs_path):
-		push_warning("Kenney character missing: " + abs_path)
+	# load() follows import remaps — required for exported PCK builds.
+	var packed := load(character_path) as PackedScene
+	if packed == null:
+		push_warning("Kenney character missing: " + character_path)
 		return
-
-	var doc := FBXDocument.new()
-	var state := FBXState.new()
-	var err := doc.append_from_file(abs_path, state)
-	if err != OK:
-		push_warning("Failed to load character FBX (err=%s)" % str(err))
-		return
-	var root := doc.generate_scene(state)
+	var root := packed.instantiate()
 	if root == null:
 		return
 
@@ -372,16 +366,11 @@ func _set_first_person_head_hidden(hidden: bool) -> void:
 
 
 func _import_anim_clip(lib: AnimationLibrary, res_path: String, src_name: String, dest_name: String, loop: bool) -> void:
-	var abs_path := ProjectSettings.globalize_path(res_path)
-	if not FileAccess.file_exists(abs_path):
-		push_warning("Animation missing: " + abs_path)
+	var packed := load(res_path) as PackedScene
+	if packed == null:
+		push_warning("Animation missing: " + res_path)
 		return
-	var doc := FBXDocument.new()
-	var state := FBXState.new()
-	if doc.append_from_file(abs_path, state) != OK:
-		push_warning("Failed to load animation: " + res_path)
-		return
-	var scene := doc.generate_scene(state)
+	var scene := packed.instantiate()
 	if scene == null:
 		return
 	var src_ap := _find_animation_player(scene)
@@ -408,13 +397,9 @@ func _import_anim_clip(lib: AnimationLibrary, res_path: String, src_name: String
 
 
 func _apply_skin_texture(node: Node) -> void:
-	var abs_skin := ProjectSettings.globalize_path(skin_path)
-	if not FileAccess.file_exists(abs_skin):
+	_skin_tex = load(skin_path) as Texture2D
+	if _skin_tex == null:
 		return
-	var img := Image.load_from_file(abs_skin)
-	if img == null or img.is_empty():
-		return
-	_skin_tex = ImageTexture.create_from_image(img)
 	_apply_tex_recursive(node, _skin_tex)
 
 

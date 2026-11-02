@@ -33,15 +33,13 @@ func _ready() -> void:
 
 
 func _load_looping_ogg(res_path: String) -> AudioStream:
-	var abs_path := ProjectSettings.globalize_path(res_path)
-	if not FileAccess.file_exists(abs_path):
-		push_error("BGM missing: " + abs_path)
-		return null
-	var stream := AudioStreamOggVorbis.load_from_file(abs_path)
+	var stream := load(res_path) as AudioStream
 	if stream == null:
-		push_error("Failed to load BGM: " + abs_path)
+		push_error("BGM missing: " + res_path)
 		return null
-	stream.loop = true
+	stream = stream.duplicate()
+	if stream is AudioStreamOggVorbis:
+		(stream as AudioStreamOggVorbis).loop = true
 	return stream
 
 
