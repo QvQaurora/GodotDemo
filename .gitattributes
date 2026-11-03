@@ -1,0 +1,52 @@
+# Normalize text to LF in the repo and working tree (avoids Godot/Git CRLF noise).
+* text=auto eol=lf
+
+# Godot / project text
+*.gd text eol=lf
+*.uid text eol=lf
+*.tscn text eol=lf
+*.tres text eol=lf
+*.import text eol=lf
+*.cfg text eol=lf
+*.godot text eol=lf
+*.cs text eol=lf
+*.shader text eol=lf
+*.gdshader text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.svg text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Binary assets — never touch line endings
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.bmp binary
+*.tga binary
+*.exr binary
+*.hdr binary
+*.ogg binary
+*.wav binary
+*.mp3 binary
+*.glb binary
+*.gltf binary
+*.fbx binary
+*.obj binary
+*.bin binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.dll binary
+*.pck binary
+*.zip binary
+*.tpz binary
