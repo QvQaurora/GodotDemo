@@ -137,7 +137,7 @@ horizontal_alignment = 1
 [node name="MapHint" type="Label" parent="Center/Panel/Margin/MapHost/MapSelect"]
 layout_mode = 2
 modulate = Color(0.7, 0.8, 0.72, 1)
-text = "默认森林可玩 · 其余为占位地面"
+text = "选择已开放场景"
 horizontal_alignment = 1
 
 [node name="Scroll" type="ScrollContainer" parent="Center/Panel/Margin/MapHost/MapSelect"]

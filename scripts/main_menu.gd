@@ -125,6 +125,9 @@ func _build_map_list() -> void:
 		child.queue_free()
 	var last_cat := ""
 	for entry in _MapCatalog.entries():
+		# Hide maps that are not open yet (placeholders stay in catalog for later).
+		if not bool(entry.get("ready", false)):
+			continue
 		var cat := str(entry.get("category", ""))
 		if cat != last_cat:
 			last_cat = cat
@@ -137,8 +140,7 @@ func _build_map_list() -> void:
 		btn.custom_minimum_size = Vector2(0, 44)
 		btn.focus_mode = Control.FOCUS_ALL
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		var tag := "" if bool(entry.get("ready", false)) else "  · 占位"
-		btn.text = "%s%s" % [str(entry.get("name", "")), tag]
+		btn.text = str(entry.get("name", ""))
 		btn.tooltip_text = str(entry.get("blurb", ""))
 		var map_id := str(entry.get("id", ""))
 		var scene_path := str(entry.get("scene", ""))

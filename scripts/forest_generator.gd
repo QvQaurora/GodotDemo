@@ -27,6 +27,8 @@ const _BakedCacheSeed = preload("res://scripts/baked_cache_seed.gd")
 @export var monster_count: int = 55
 @export var ground_normal_scale: float = 0.9
 @export var treasure_count: int = 48
+## Optional Blender-authored scenery (terrain/trees/roads/ponds). Gameplay heightmap + actors/treasures still run.
+@export var blender_world: PackedScene
 @export var use_terrain_cache: bool = true
 @export var use_placement_cache: bool = true
 @export var chunk_size: float = 64.0
@@ -89,7 +91,63 @@ func _on_settings_changed_stream() -> void:
 
 
 func get_terrain_height(x: float, z: float) -> float:
+	if blender_world != null and has_node("BlenderWorld"):
+		var hit := _raycast_blender_ground_y(x, z)
+		if not is_nan(hit):
+			return hit
 	return _height_at(x, z)
+
+
+func _instance_blender_world() -> void:
+	if blender_world == null:
+		return
+	if has_node("BlenderWorld"):
+		return
+	var root := blender_world.instantiate()
+	root.name = "BlenderWorld"
+	add_child(root)
+	_add_blender_terrain_collision(root)
+	print("Blender forest scenery instanced: ", blender_world.resource_path)
+
+
+func _add_blender_terrain_collision(root: Node) -> void:
+	for node in root.find_children("*", "MeshInstance3D", true, false):
+		var mi := node as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		var n := String(mi.name).to_lower()
+		if n.find("terrain") < 0 and n.find("grid") < 0:
+			continue
+		if mi.get_node_or_null("TerrainBody") != null:
+			continue
+		var shape: Shape3D = mi.mesh.create_trimesh_shape()
+		if shape == null:
+			continue
+		var body := StaticBody3D.new()
+		body.name = "TerrainBody"
+		body.collision_layer = 1
+		body.collision_mask = 0
+		var col := CollisionShape3D.new()
+		col.shape = shape
+		body.add_child(col)
+		mi.add_child(body)
+		print("Blender terrain collision: ", mi.name)
+
+
+func _raycast_blender_ground_y(x: float, z: float) -> float:
+	var space := get_world_3d().direct_space_state
+	if space == null:
+		return NAN
+	var from := Vector3(x, 500.0, z)
+	var to := Vector3(x, -200.0, z)
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.collision_mask = 1
+	q.collide_with_areas = false
+	q.collide_with_bodies = true
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return NAN
+	return float(hit["position"].y)
 
 
 func is_pickup_collected(pickup_id: String) -> bool:
@@ -108,17 +166,23 @@ func _build_world_async() -> void:
 	# Peaks are deterministic from seed; rebuild list even on terrain cache hits (for map).
 	_collect_mountain_peaks()
 	await get_tree().process_frame
+	_instance_blender_world()
 	_build_ground()
+	if blender_world != null:
+		var ground_vis := get_node_or_null("Ground")
+		if ground_vis is VisualInstance3D:
+			(ground_vis as VisualInstance3D).visible = false
 	_build_world_bounds()
 	_place_player_on_spawn()
 	await get_tree().process_frame
-	_build_road_markings()
-	_build_traffic_lights()
-	await get_tree().process_frame
-	_build_pond_meshes()
-	await get_tree().process_frame
-	_build_houses()
-	await get_tree().process_frame
+	if blender_world == null:
+		_build_road_markings()
+		_build_traffic_lights()
+		await get_tree().process_frame
+		_build_pond_meshes()
+		await get_tree().process_frame
+		_build_houses()
+		await get_tree().process_frame
 	# 2/3/4) Chunk streaming + collision LOD + deferred actors/pickups.
 	_setup_world_streamer()
 	apply_streaming_budget(GameSettings.streaming_budget())
@@ -127,11 +191,12 @@ func _build_world_async() -> void:
 	await _prewarm_runtime_assets()
 	await get_tree().process_frame
 	if not _try_load_placement_cache():
-		await _prepare_forest_chunks()
-		await get_tree().process_frame
-		await _prepare_rock_chunks()
-		await _prepare_bush_chunks()
-		await get_tree().process_frame
+		if blender_world == null:
+			await _prepare_forest_chunks()
+			await get_tree().process_frame
+			await _prepare_rock_chunks()
+			await _prepare_bush_chunks()
+			await get_tree().process_frame
 		await _prepare_actor_spawns()
 		_prepare_treasure_spawns()
 		_save_placement_cache()
@@ -149,8 +214,10 @@ func _terrain_cache_key() -> String:
 
 func _placement_cache_key() -> String:
 	# "u4f" = even tree coverage; "trv2" = Kenney treasure meshes + value.
-	return "u4f_trv2_m%d_h%d_r%d_t%d_r%d_b%d_a%d_m%d_tr%d" % [
-		mountain_count, int(mountain_height), int(mountain_radius),
+	# "bl1" = Blender scenery mode (skip Kenney tree/rock/bush props).
+	var tag := "bl1" if blender_world != null else "u4f"
+	return "%s_trv2_m%d_h%d_r%d_t%d_r%d_b%d_a%d_m%d_tr%d" % [
+		tag, mountain_count, int(mountain_height), int(mountain_radius),
 		tree_count, 220, 420, animal_count, monster_count, treasure_count
 	]
 
