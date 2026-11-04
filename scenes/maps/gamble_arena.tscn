@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://6r4cinf1vdjy"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_gamble_arena" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "gamble_arena"
+map_title = "赌命竞技场"
+map_blurb = "斗兽场、聚光灯"

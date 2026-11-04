@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://zibyefifbpr3"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_egypt_pyramid" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "egypt_pyramid"
+map_title = "古埃及金字塔"
+map_blurb = "甬道、壁画、石棺"

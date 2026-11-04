@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://goipds13ay1f"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_museum" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "museum"
+map_title = "博物馆"
+map_blurb = "展厅、玻璃柜、安保"

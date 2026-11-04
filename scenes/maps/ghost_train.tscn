@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://3wgkj6pxpudq"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_ghost_train" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "ghost_train"
+map_title = "幽灵列车"
+map_blurb = "行驶中的列车"

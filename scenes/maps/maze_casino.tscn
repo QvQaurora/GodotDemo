@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://834s4c4m9xi0"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_maze_casino" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "maze_casino"
+map_title = "迷宫赌城"
+map_blurb = "每面墙都是老虎机"

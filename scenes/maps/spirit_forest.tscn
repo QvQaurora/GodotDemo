@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://wl47b6w0s6g9"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_spirit_forest" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "spirit_forest"
+map_title = "精灵森林"
+map_blurb = "发光蘑菇、树屋"

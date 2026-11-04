@@ -630,6 +630,10 @@ func _spawn_treasure(spawn: Dictionary) -> void:
 	node.set("item_desc", str(spawn["item_desc"]))
 	node.set("item_color", spawn["item_color"])
 	node.set("amount", int(spawn.get("amount", 1)))
+	node.set("item_value", int(spawn.get("item_value", 10)))
+	node.set("mesh_path", str(spawn.get("mesh_path", "")))
+	node.set("target_height", float(spawn.get("target_height", 0.45)))
+	node.set("yaw", float(spawn.get("yaw", 0.0)))
 	var p: Vector3 = spawn["pos"]
 	node.position = p
 	_treasures_root.add_child(node)

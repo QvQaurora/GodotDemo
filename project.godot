@@ -14,8 +14,8 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 
 [application]
 
-config/name="Forest Demo"
-config/description="1000x1000m forest demo with Kenney assets, roads, and critters"
+config/name="宝影劫掠"
+config/description="搜刮寻宝 · 多场景占位与默认森林"
 run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
@@ -24,6 +24,7 @@ config/icon="res://icon.svg"
 
 GameSettings="*res://scripts/game_settings.gd"
 GameSave="*res://scripts/game_save.gd"
+GameSession="*res://scripts/game_session.gd"
 AmbientAudio="*res://scripts/ambient_audio.gd"
 
 [display]

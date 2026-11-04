@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://8qe4cs3ql35w"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_abandoned_supermarket" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "abandoned_supermarket"
+map_title = "废弃超市"
+map_blurb = "货架倒塌、冷柜闪烁"

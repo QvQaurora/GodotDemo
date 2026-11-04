@@ -101,7 +101,7 @@ mountain_radius = 95.0
 grass_count = 10000
 grass_tile_meters = 3.5
 ground_normal_scale = 0.9
-treasure_count = 28
+treasure_count = 48
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.0, 0)

@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://39y02u840xxi"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_abandoned_cruise" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "abandoned_cruise"
+map_title = "废弃游轮"
+map_blurb = "倾斜甲板、赌场大厅"

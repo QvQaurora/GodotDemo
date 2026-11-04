@@ -1,12 +1,17 @@
 extends Control
-## Loading bridge into the forest scene. Keep the dark cover — game scene continues it.
+## Loading bridge into the selected map (forest or placeholder).
 
-const GAME_SCENE := "res://scenes/main.tscn"
+const FALLBACK_SCENE := "res://scenes/maps/forest.tscn"
 
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	DisplayServer.window_move_to_foreground()
-	# One frame so this screen paints, then hand off (main scene shows its own overlay).
 	await get_tree().process_frame
-	get_tree().change_scene_to_file(GAME_SCENE)
+	var path := FALLBACK_SCENE
+	var session := get_node_or_null("/root/GameSession")
+	if session != null:
+		var candidate := str(session.selected_scene_path)
+		if candidate != "" and ResourceLoader.exists(candidate):
+			path = candidate
+	get_tree().change_scene_to_file(path)

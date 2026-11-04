@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://8nste40zbib3"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_time_rift" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "time_rift"
+map_title = "时间裂隙"
+map_blurb = "破碎空间、时间残影"

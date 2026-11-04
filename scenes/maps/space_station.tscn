@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://ftp2ythpqugi"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_space_station" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "space_station"
+map_title = "太空站"
+map_blurb = "失重舱、舷窗、控制台"

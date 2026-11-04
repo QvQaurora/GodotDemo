@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://fzxv5ovszdkz"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_inverted_world" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "inverted_world"
+map_title = "倒置世界"
+map_blurb = "上下颠倒、头顶深渊"

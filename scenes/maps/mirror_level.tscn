@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://78zarkveo9qu"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_mirror_level" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "mirror_level"
+map_title = "镜像关卡"
+map_blurb = "左右完全对称"

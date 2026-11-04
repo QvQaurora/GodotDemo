@@ -123,11 +123,19 @@ func get_save_data() -> Array:
 			"count": int(item["count"]),
 			"desc": str(item["desc"]),
 			"color": [c.r, c.g, c.b, c.a],
+			"value": int(item.get("value", 0)),
 		}
 	return out
 
 
-func add_item(id: String, item_name: String, count: int, desc: String, color: Color) -> bool:
+func add_item(
+	id: String,
+	item_name: String,
+	count: int,
+	desc: String,
+	color: Color,
+	item_value: int = 0
+) -> bool:
 	# Stack into existing slot with same id, else first empty slot.
 	for i in SLOT_COUNT:
 		var item = _slots[i]
@@ -144,6 +152,7 @@ func add_item(id: String, item_name: String, count: int, desc: String, color: Co
 				"count": count,
 				"desc": desc,
 				"color": color,
+				"value": item_value,
 			}
 			_refresh_grid()
 			return true
@@ -172,6 +181,7 @@ func apply_save_data(data: Variant) -> void:
 			"count": int(d.get("count", 1)),
 			"desc": str(d.get("desc", "")),
 			"color": col,
+			"value": int(d.get("value", 0)),
 		}
 	_selected = -1
 	_set_detail(-1)
@@ -209,7 +219,11 @@ func _refresh_grid() -> void:
 			btn.text = "%s\nx%d" % [str(item["name"]), int(item["count"])]
 			var c: Color = item["color"]
 			btn.modulate = Color(lerpf(c.r, 1.0, 0.35), lerpf(c.g, 1.0, 0.35), lerpf(c.b, 1.0, 0.35), 1.0)
-			btn.tooltip_text = "%s × %d" % [str(item["name"]), int(item["count"])]
+			var v := int(item.get("value", 0))
+			if v > 0:
+				btn.tooltip_text = "%s × %d · %d金" % [str(item["name"]), int(item["count"]), v]
+			else:
+				btn.tooltip_text = "%s × %d" % [str(item["name"]), int(item["count"])]
 		btn.button_pressed = i == _selected
 
 
@@ -224,4 +238,8 @@ func _set_detail(index: int) -> void:
 		detail.text = "选择一个物品查看说明"
 		return
 	var item = _slots[index]
-	detail.text = "%s × %d\n%s" % [str(item["name"]), int(item["count"]), str(item["desc"])]
+	var v := int(item.get("value", 0))
+	if v > 0:
+		detail.text = "%s × %d · %d金\n%s" % [str(item["name"]), int(item["count"]), v, str(item["desc"])]
+	else:
+		detail.text = "%s × %d\n%s" % [str(item["name"]), int(item["count"]), str(item["desc"])]

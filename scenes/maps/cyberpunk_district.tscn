@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://wowny8me4d7j"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_cyberpunk_district" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "cyberpunk_district"
+map_title = "赛博朋克街区"
+map_blurb = "霓虹、雨水、全息广告"

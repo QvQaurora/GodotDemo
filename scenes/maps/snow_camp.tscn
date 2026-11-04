@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://qs5ywpatjosf"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_snow_camp" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "snow_camp"
+map_title = "雪山营地"
+map_blurb = "暴风雪、木屋、缆车"

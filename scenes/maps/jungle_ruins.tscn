@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://u9jnfh6sj89o"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_jungle_ruins" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "jungle_ruins"
+map_title = "丛林遗迹"
+map_blurb = "藤蔓、石像、瀑布"

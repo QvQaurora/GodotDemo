@@ -61,13 +61,13 @@ theme_override_constants/separation = 18
 [node name="Title" type="Label" parent="Center/Panel/Margin/MainButtons"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 40
-text = "森林漫步"
+text = "宝影劫掠"
 horizontal_alignment = 1
 
 [node name="Subtitle" type="Label" parent="Center/Panel/Margin/MainButtons"]
 layout_mode = 2
 modulate = Color(0.72, 0.82, 0.72, 1)
-text = "1000 × 1000 米 · 基础几何体场景"
+text = "搜刮 · 赌博 · 逃生"
 horizontal_alignment = 1
 
 [node name="Spacer" type="Control" parent="Center/Panel/Margin/MainButtons"]
@@ -80,7 +80,7 @@ custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 focus_mode = 2
 theme_override_font_sizes/font_size = 20
-text = "新游戏"
+text = "开始游戏"
 
 [node name="SaveButton" type="Button" parent="Center/Panel/Margin/MainButtons"]
 custom_minimum_size = Vector2(0, 48)
@@ -118,3 +118,42 @@ mouse_filter = 2
 
 [node name="SaveMenu" parent="Center/Panel/Margin/SaveHost" instance=ExtResource("3_save")]
 layout_mode = 2
+
+[node name="MapHost" type="MarginContainer" parent="Center/Panel/Margin"]
+visible = false
+layout_mode = 2
+mouse_filter = 2
+
+[node name="MapSelect" type="VBoxContainer" parent="Center/Panel/Margin/MapHost"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="MapTitle" type="Label" parent="Center/Panel/Margin/MapHost/MapSelect"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "选择场景"
+horizontal_alignment = 1
+
+[node name="MapHint" type="Label" parent="Center/Panel/Margin/MapHost/MapSelect"]
+layout_mode = 2
+modulate = Color(0.7, 0.8, 0.72, 1)
+text = "默认森林可玩 · 其余为占位地面"
+horizontal_alignment = 1
+
+[node name="Scroll" type="ScrollContainer" parent="Center/Panel/Margin/MapHost/MapSelect"]
+custom_minimum_size = Vector2(0, 360)
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="List" type="VBoxContainer" parent="Center/Panel/Margin/MapHost/MapSelect/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="BackButton" type="Button" parent="Center/Panel/Margin/MapHost/MapSelect"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+focus_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "返回"

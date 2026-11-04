@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://68ragaxqqxa8"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_deep_sea_wreck" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "deep_sea_wreck"
+map_title = "深海沉船"
+map_blurb = "黑暗、水压、发光鱼"

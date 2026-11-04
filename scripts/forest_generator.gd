@@ -26,7 +26,7 @@ const _BakedCacheSeed = preload("res://scripts/baked_cache_seed.gd")
 @export var animal_count: int = 140
 @export var monster_count: int = 55
 @export var ground_normal_scale: float = 0.9
-@export var treasure_count: int = 28
+@export var treasure_count: int = 48
 @export var use_terrain_cache: bool = true
 @export var use_placement_cache: bool = true
 @export var chunk_size: float = 64.0
@@ -148,8 +148,8 @@ func _terrain_cache_key() -> String:
 
 
 func _placement_cache_key() -> String:
-	# "u4f" = even tree coverage (old caches piled trees on map edges, emptying the play area).
-	return "u4f_m%d_h%d_r%d_t%d_r%d_b%d_a%d_m%d_tr%d" % [
+	# "u4f" = even tree coverage; "trv2" = Kenney treasure meshes + value.
+	return "u4f_trv2_m%d_h%d_r%d_t%d_r%d_b%d_a%d_m%d_tr%d" % [
 		mountain_count, int(mountain_height), int(mountain_radius),
 		tree_count, 220, 420, animal_count, monster_count, treasure_count
 	]
@@ -282,6 +282,7 @@ func _rebuild_map_treasure_markers_from_cache(treasures: Array) -> void:
 			"x": pos.x,
 			"z": pos.z,
 			"name": str(tr.get("item_name", "")),
+			"value": int(tr.get("item_value", 0)),
 		})
 
 
@@ -2664,13 +2665,52 @@ func _prepare_treasure_spawns() -> void:
 		return
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value + 515
+	# Kenney kits differ in native size; target_height normalizes each to world meters.
+	# weight: common food high, rare chests/keys low (mind: high-value is uncommon).
+	const BASE := "res://assets/kenney_treasures/"
 	var defs: Array[Dictionary] = [
-		{"id": "gem", "name": "\u73ca\u740a\u77f3", "desc": "\u6797\u95f4\u95ea\u8000\u7684\u5b9d\u77f3", "color": Color(0.95, 0.72, 0.18)},
-		{"id": "coin", "name": "\u53e4\u5e01", "desc": "\u751f\u950b\u73b0\u4e00\u89d2\u7684\u91d1\u5e01", "color": Color(0.85, 0.7, 0.25)},
-		{"id": "feather", "name": "\u5f69\u7fbd", "desc": "\u4ece\u9ad8\u5904\u843d\u4e0b\u7684\u7f8e\u4e3d\u7fbd\u6bdb", "color": Color(0.35, 0.75, 0.95)},
-		{"id": "crystal", "name": "\u6c34\u6676", "desc": "\u51b7\u51bb\u7684\u84dd\u8272\u6c34\u6676", "color": Color(0.35, 0.55, 1.0)},
-		{"id": "relic", "name": "\u9057\u7269", "desc": "\u53e4\u8001\u7684\u795e\u79d8\u9057\u7269", "color": Color(0.65, 0.42, 0.22)},
+		{"id": "apple", "name": "红苹果", "desc": "新鲜却略显异样的果实", "color": Color(0.85, 0.25, 0.2),
+			"mesh": BASE + "food/apple.glb", "h": 0.22, "value": 8, "weight": 14},
+		{"id": "banana", "name": "香蕉", "desc": "弯弯的黄色水果", "color": Color(0.92, 0.82, 0.2),
+			"mesh": BASE + "food/banana.glb", "h": 0.28, "value": 10, "weight": 12},
+		{"id": "avocado", "name": "牛油果", "desc": "软乎乎的绿色果实", "color": Color(0.35, 0.55, 0.22),
+			"mesh": BASE + "food/avocado.glb", "h": 0.24, "value": 12, "weight": 10},
+		{"id": "bread", "name": "面包", "desc": "还能吃的硬面包", "color": Color(0.78, 0.58, 0.32),
+			"mesh": BASE + "food/bread.glb", "h": 0.18, "value": 9, "weight": 12},
+		{"id": "cheese", "name": "奶酪", "desc": "带着孔洞的香气奶酪", "color": Color(0.95, 0.82, 0.35),
+			"mesh": BASE + "food/cheese.glb", "h": 0.2, "value": 14, "weight": 10},
+		{"id": "burger", "name": "汉堡", "desc": "谁把这个丢在林子里了", "color": Color(0.7, 0.45, 0.22),
+			"mesh": BASE + "food/burger.glb", "h": 0.22, "value": 18, "weight": 8},
+		{"id": "cake", "name": "蛋糕", "desc": "意外完整的甜品", "color": Color(0.95, 0.7, 0.75),
+			"mesh": BASE + "food/cake.glb", "h": 0.32, "value": 28, "weight": 5},
+		{"id": "fish", "name": "鲜鱼", "desc": "刚上岸的鱼，或许值钱", "color": Color(0.45, 0.65, 0.85),
+			"mesh": BASE + "food/fish.glb", "h": 0.26, "value": 35, "weight": 6},
+		{"id": "pot", "name": "陶罐", "desc": "空空的陶罐，可是好看", "color": Color(0.55, 0.4, 0.28),
+			"mesh": BASE + "food/pot.glb", "h": 0.4, "value": 22, "weight": 7},
+		{"id": "barrel", "name": "木桶", "desc": "沉重的木桶，里面或许有货", "color": Color(0.5, 0.35, 0.22),
+			"mesh": BASE + "food/barrel.glb", "h": 0.85, "value": 45, "weight": 4},
+		{"id": "bottle", "name": "旧酒瓶", "desc": "海盗留下的空瓶", "color": Color(0.3, 0.55, 0.35),
+			"mesh": BASE + "pirate/bottle.glb", "h": 0.34, "value": 30, "weight": 6},
+		{"id": "cannon_ball", "name": "炮弹", "desc": "沉甸甸的铁球", "color": Color(0.25, 0.25, 0.28),
+			"mesh": BASE + "pirate/cannon-ball.glb", "h": 0.28, "value": 40, "weight": 4},
+		{"id": "crate", "name": "货箱", "desc": "钉死的木箱", "color": Color(0.55, 0.4, 0.25),
+			"mesh": BASE + "pirate/crate.glb", "h": 0.7, "value": 55, "weight": 3},
+		{"id": "pirate_chest", "name": "木宝箱", "desc": "锈锁的海盗宝箱", "color": Color(0.55, 0.38, 0.2),
+			"mesh": BASE + "pirate/chest.glb", "h": 0.55, "value": 90, "weight": 2},
+		{"id": "coin", "name": "古币", "desc": "生锈现一角的金币", "color": Color(0.9, 0.75, 0.25),
+			"mesh": BASE + "dungeon/coin.glb", "h": 0.1, "value": 25, "weight": 8},
+		{"id": "potion", "name": "药瓶", "desc": "神秘的彩色药剂", "color": Color(0.55, 0.3, 0.75),
+			"mesh": BASE + "dungeon/potion.glb", "h": 0.3, "value": 60, "weight": 3},
+		{"id": "key", "name": "旧钥匙", "desc": "或许能打开某处的门", "color": Color(0.75, 0.65, 0.3),
+			"mesh": BASE + "dungeon/key.glb", "h": 0.22, "value": 80, "weight": 2},
+		{"id": "shield", "name": "圆盾", "desc": "磨损的圆形盾牌", "color": Color(0.45, 0.5, 0.6),
+			"mesh": BASE + "dungeon/shield-round.glb", "h": 0.72, "value": 110, "weight": 2},
+		{"id": "dungeon_chest", "name": "宝箱", "desc": "沉重的宝藏箱", "color": Color(0.7, 0.55, 0.25),
+			"mesh": BASE + "dungeon/chest.glb", "h": 0.5, "value": 150, "weight": 1},
 	]
+	var total_w := 0
+	for d in defs:
+		total_w += int(d["weight"])
 	var positions := _sample_positions_random(treasure_count, 12.0, 22.0, rng, 0.0, 0.0, 36.0)
 	_map_treasure_markers.clear()
 	var placed := 0
@@ -2678,9 +2718,10 @@ func _prepare_treasure_spawns() -> void:
 		var pid := "treasure_%d" % i
 		if _collected_pickups.has(pid):
 			continue
-		var def: Dictionary = defs[i % defs.size()]
+		var def: Dictionary = _pick_weighted_treasure(defs, total_w, rng)
 		var p: Vector3 = positions[i]
-		var pos := Vector3(p.x, p.y + 0.05, p.z)
+		var pos := Vector3(p.x, p.y + 0.02, p.z)
+		var yaw := rng.randf_range(0.0, TAU)
 		_streamer.call("add_treasure", {
 			"id": pid,
 			"item_id": str(def["id"]),
@@ -2688,6 +2729,10 @@ func _prepare_treasure_spawns() -> void:
 			"item_desc": str(def["desc"]),
 			"item_color": def["color"],
 			"amount": 1,
+			"item_value": int(def["value"]),
+			"mesh_path": str(def["mesh"]),
+			"target_height": float(def["h"]),
+			"yaw": yaw,
 			"pos": pos,
 		})
 		_map_treasure_markers.append({
@@ -2695,6 +2740,17 @@ func _prepare_treasure_spawns() -> void:
 			"x": pos.x,
 			"z": pos.z,
 			"name": str(def["name"]),
+			"value": int(def["value"]),
 		})
 		placed += 1
 	print("Treasures prepared: ", placed)
+
+
+func _pick_weighted_treasure(defs: Array[Dictionary], total_w: int, rng: RandomNumberGenerator) -> Dictionary:
+	var roll := rng.randi_range(1, maxi(total_w, 1))
+	var acc := 0
+	for d in defs:
+		acc += int(d["weight"])
+		if roll <= acc:
+			return d
+	return defs[defs.size() - 1]

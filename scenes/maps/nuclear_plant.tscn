@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://6bx1l9mv6k57"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_nuclear_plant" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "nuclear_plant"
+map_title = "核电站"
+map_blurb = "辐射警告、冷却塔"

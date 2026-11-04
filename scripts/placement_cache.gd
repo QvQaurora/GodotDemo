@@ -4,7 +4,7 @@ extends RefCounted
 
 
 const MAGIC := 0x504C4331 # "PLC1"
-const VERSION := 1
+const VERSION := 2
 
 
 static func cache_path(seed_value: int, terrain_size: float, extras: String) -> String:
@@ -206,6 +206,10 @@ static func _write_treasures(f: FileAccess, items: Array) -> void:
 		var c: Color = it.get("item_color", Color.WHITE)
 		f.store_float(c.r); f.store_float(c.g); f.store_float(c.b); f.store_float(c.a)
 		f.store_32(int(it.get("amount", 1)))
+		f.store_32(int(it.get("item_value", 10)))
+		_store_string(f, str(it.get("mesh_path", "")))
+		f.store_float(float(it.get("target_height", 0.45)))
+		f.store_float(float(it.get("yaw", 0.0)))
 		var p: Vector3 = it.get("pos", Vector3.ZERO)
 		f.store_float(p.x); f.store_float(p.y); f.store_float(p.z)
 
@@ -222,6 +226,10 @@ static func _read_treasures(f: FileAccess) -> Array:
 			"item_desc": _read_string(f),
 			"item_color": Color(f.get_float(), f.get_float(), f.get_float(), f.get_float()),
 			"amount": int(f.get_32()),
+			"item_value": int(f.get_32()),
+			"mesh_path": _read_string(f),
+			"target_height": f.get_float(),
+			"yaw": f.get_float(),
 			"pos": Vector3(f.get_float(), f.get_float(), f.get_float()),
 		}
 	return out

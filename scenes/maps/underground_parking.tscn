@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://g3tahn1hz8fz"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_underground_parking" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "underground_parking"
+map_title = "地下停车场"
+map_blurb = "昏暗车位、滴水声"

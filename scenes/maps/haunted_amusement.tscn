@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://b9zmnytq56pk"]
+
+[ext_resource type="Script" path="res://scripts/placeholder_map.gd" id="1_stub"]
+
+[node name="Map_haunted_amusement" type="Node3D"]
+script = ExtResource("1_stub")
+map_id = "haunted_amusement"
+map_title = "鬼屋游乐园"
+map_blurb = "旋转木马、鬼屋"
