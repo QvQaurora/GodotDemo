@@ -56,5 +56,6 @@ static func _map_txt_entries() -> Array[Dictionary]:
 	]
 	for r in rows:
 		r["scene"] = "res://scenes/maps/%s.tscn" % str(r["id"])
-		r["ready"] = false
+		var glb := "res://assets/blender_maps/%s/world.glb" % str(r["id"])
+		r["ready"] = ResourceLoader.exists(glb)
 	return rows

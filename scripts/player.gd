@@ -242,7 +242,8 @@ func apply_save_data(data: Variant) -> void:
 	_air_height = 0.0
 	_air_vel = 0.0
 	velocity = Vector3.ZERO
-	global_position = Vector3(x, _terrain_y() + FEET_CLEARANCE, z)
+	global_position = Vector3(x, 0.0, z)
+	global_position.y = _support_y() + FEET_CLEARANCE
 	hp_max = float(d.get("hp_max", hp_max))
 	hp = clampf(float(d.get("hp", hp_max)), 0.0, hp_max)
 	_emit_health()
@@ -260,6 +261,34 @@ func _terrain_y() -> float:
 	return 0.0
 
 
+func _support_y() -> float:
+	## Walk/jump support = terrain, or a prop roof/top under the feet (layer 1).
+	## Without this, stick-to-terrain yanks Y through rocks/houses after a jump.
+	var ty := _terrain_y()
+	var space := get_world_3d().direct_space_state
+	if space == null:
+		return ty
+	var x := global_position.x
+	var z := global_position.z
+	var from_y := maxf(global_position.y + 0.75, ty + 1.0)
+	var q := PhysicsRayQueryParameters3D.create(
+		Vector3(x, from_y, z),
+		Vector3(x, ty - 4.0, z)
+	)
+	q.collision_mask = 1
+	q.collide_with_areas = false
+	q.collide_with_bodies = true
+	q.exclude = [get_rid()]
+	var hit := space.intersect_ray(q)
+	if hit.is_empty():
+		return ty
+	var n: Vector3 = hit.get("normal", Vector3.UP)
+	# Walls/side faces are not standable — keep terrain height.
+	if n.y < 0.35:
+		return ty
+	return maxf(ty, float(hit["position"].y))
+
+
 func _snap_to_ground() -> void:
 	for _i in 40:
 		var forest := get_tree().get_first_node_in_group("forest_world")
@@ -267,7 +296,7 @@ func _snap_to_ground() -> void:
 			_air_height = 0.0
 			_air_vel = 0.0
 			velocity = Vector3.ZERO
-			global_position.y = _terrain_y() + FEET_CLEARANCE
+			global_position.y = _support_y() + FEET_CLEARANCE
 			return
 		await get_tree().process_frame
 
@@ -361,7 +390,7 @@ func _physics_process(delta: float) -> void:
 		velocity = Vector3.ZERO
 		if stick_to_terrain:
 			move_and_slide()
-			global_position.y = _terrain_y() + FEET_CLEARANCE + _air_height
+			global_position.y = _support_y() + FEET_CLEARANCE + _air_height
 		_update_animation(false)
 		return
 
@@ -407,20 +436,26 @@ func _physics_process(delta: float) -> void:
 			model.rotation.y = 0.0
 
 	if stick_to_terrain:
-		var on_ground := _air_height <= 0.001
-		if _jump_pressed and on_ground:
-			_air_vel = jump_velocity
-			_air_height = 0.01
-		_jump_pressed = false
-		if not on_ground or _air_vel > 0.0:
-			_air_vel -= gravity * gravity_scale * delta
-			_air_height += _air_vel * delta
-			if _air_height <= 0.0:
-				_air_height = 0.0
-				_air_vel = 0.0
+		# Y is scripted (terrain + prop tops). Integrate jump in world space so
+		# landing on rocks/roofs is not yanked down to bare terrain through the mesh.
 		velocity.y = 0.0
+		var support := _support_y()
+		var grounded := _air_vel <= 0.0 and global_position.y <= support + FEET_CLEARANCE + 0.08
+		if _jump_pressed and grounded:
+			_air_vel = jump_velocity
+		_jump_pressed = false
 		move_and_slide()
-		global_position.y = _terrain_y() + FEET_CLEARANCE + _air_height
+		support = _support_y()
+		if _air_vel != 0.0 or global_position.y > support + FEET_CLEARANCE + 0.08:
+			_air_vel -= gravity * gravity_scale * delta
+			global_position.y += _air_vel * delta
+			if global_position.y <= support + FEET_CLEARANCE and _air_vel <= 0.0:
+				global_position.y = support + FEET_CLEARANCE
+				_air_vel = 0.0
+		else:
+			global_position.y = support + FEET_CLEARANCE
+			_air_vel = 0.0
+		_air_height = maxf(0.0, global_position.y - support - FEET_CLEARANCE)
 	else:
 		_air_height = 0.0
 		_air_vel = 0.0
