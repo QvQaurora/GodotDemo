@@ -9,6 +9,10 @@ var _boot_hint: Label
 
 
 func _ready() -> void:
+	for c in get_children():
+		if str(c.name) == "BootOverlay":
+			remove_child(c)
+			c.free()
 	_show_boot_overlay()
 	call_deferred("_bootstrap")
 
@@ -56,16 +60,16 @@ func _set_boot_hint(text: String) -> void:
 
 
 func _hide_boot_overlay() -> void:
-	var layer := _boot_layer
 	_boot_layer = null
 	_boot_dim = null
 	_boot_title = null
 	_boot_hint = null
-	if layer != null and is_instance_valid(layer):
-		layer.queue_free()
 	for n in get_tree().get_nodes_in_group("boot_overlay"):
 		if is_instance_valid(n):
 			n.queue_free()
+	for c in get_children():
+		if str(c.name) == "BootOverlay" and is_instance_valid(c):
+			c.queue_free()
 	await get_tree().process_frame
 
 

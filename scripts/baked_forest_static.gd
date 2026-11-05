@@ -25,11 +25,14 @@ func _ready() -> void:
 	add_to_group("forest_world")
 	_load_heights()
 	_ensure_ground_mesh()
+	# Ground collision is cheap (~0.1s) and required before the player drops in.
+	# Prop colliders used to be built all at once (~3k shapes) and froze scene load.
 	if not Engine.is_editor_hint():
 		_ensure_ground_collision()
-		_ensure_prop_colliders()
 	world_ready = true
 	world_built.emit()
+	if not Engine.is_editor_hint():
+		call_deferred("_build_prop_colliders_async")
 
 
 func get_terrain_height(x: float, z: float) -> float:
@@ -126,7 +129,7 @@ func _ensure_ground_collision() -> void:
 	body.add_child(col)
 
 
-func _ensure_prop_colliders() -> void:
+func _build_prop_colliders_async() -> void:
 	if get_node_or_null("PropColliders") != null:
 		return
 	if not ResourceLoader.exists(PROPS_PATH):
@@ -139,10 +142,19 @@ func _ensure_prop_colliders() -> void:
 	body.collision_layer = 1
 	body.collision_mask = 0
 	add_child(body)
+
+	const BATCH := 256
+	var n := 0
 	for t in data.get("trees"):
 		_add_cyl(body, t["xf"].origin, float(t.get("col_r", 0.2)), float(t.get("col_h", 1.0)))
+		n += 1
+		if n % BATCH == 0:
+			await get_tree().process_frame
 	for b in data.get("bushes"):
 		_add_sphere(body, b["xf"].origin + Vector3(0, 0.35, 0), float(b.get("col_r", 0.3)))
+		n += 1
+		if n % BATCH == 0:
+			await get_tree().process_frame
 	for r in data.get("rocks"):
 		var col: Dictionary = r.get("col", {})
 		match int(col.get("shape", 0)):
@@ -150,6 +162,9 @@ func _ensure_prop_colliders() -> void:
 				_add_box(body, r["xf"].origin, col.get("size", Vector3.ONE), float(col.get("yaw", 0.0)))
 			_:
 				_add_sphere(body, r["xf"].origin, float(col.get("radius", 0.5)))
+		n += 1
+		if n % BATCH == 0:
+			await get_tree().process_frame
 
 
 func _add_cyl(parent: Node, origin: Vector3, radius: float, height: float) -> void:

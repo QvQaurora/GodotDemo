@@ -9,8 +9,17 @@ var _boot_hint: Label
 
 
 func _ready() -> void:
+	_strip_stale_boot_overlays()
 	_show_boot_overlay()
 	call_deferred("_bootstrap")
+
+
+func _strip_stale_boot_overlays() -> void:
+	# forest_baked.tscn once packed a leftover BootOverlay from bake — remove any stale copy.
+	for c in get_children():
+		if str(c.name) == "BootOverlay":
+			remove_child(c)
+			c.free()
 
 
 func _show_boot_overlay() -> void:
@@ -44,7 +53,7 @@ func _show_boot_overlay() -> void:
 	vbox.add_child(_boot_title)
 
 	_boot_hint = Label.new()
-	_boot_hint.text = "静态地图就绪"
+	_boot_hint.text = "准备地形…"
 	_boot_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_boot_hint.modulate = Color(0.7, 0.78, 0.7, 1.0)
 	vbox.add_child(_boot_hint)
@@ -56,16 +65,17 @@ func _set_boot_hint(text: String) -> void:
 
 
 func _hide_boot_overlay() -> void:
-	var layer := _boot_layer
 	_boot_layer = null
 	_boot_dim = null
 	_boot_title = null
 	_boot_hint = null
-	if layer != null and is_instance_valid(layer):
-		layer.queue_free()
+	# Free every overlay by group and by name (covers packed leftovers).
 	for n in get_tree().get_nodes_in_group("boot_overlay"):
 		if is_instance_valid(n):
 			n.queue_free()
+	for c in get_children():
+		if str(c.name) == "BootOverlay" and is_instance_valid(c):
+			c.queue_free()
 	await get_tree().process_frame
 
 

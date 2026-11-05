@@ -15369,36 +15369,3 @@ process_mode = 3
 layer = 100
 visible = false
 script = ExtResource("20_nhtpt")
-
-[node name="BootOverlay" type="CanvasLayer" parent="." unique_id=255609832]
-process_mode = 3
-layer = 128
-
-[node name="@ColorRect@174" type="ColorRect" parent="BootOverlay" unique_id=1971392553]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-color = Color(0.08, 0.12, 0.09, 1)
-
-[node name="@CenterContainer@175" type="CenterContainer" parent="BootOverlay" unique_id=108263188]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-mouse_filter = 2
-
-[node name="@VBoxContainer@176" type="VBoxContainer" parent="BootOverlay/@CenterContainer@175" unique_id=407173207]
-layout_mode = 2
-theme_override_constants/separation = 12
-alignment = 1
-
-[node name="@Label@177" type="Label" parent="BootOverlay/@CenterContainer@175/@VBoxContainer@176" unique_id=2104719055]
-layout_mode = 2
-theme_override_font_sizes/font_size = 32
-text = "正在加载森林..."
-horizontal_alignment = 1
-
-[node name="@Label@178" type="Label" parent="BootOverlay/@CenterContainer@175/@VBoxContainer@176" unique_id=1675181028]
-modulate = Color(0.7, 0.78, 0.7, 1)
-layout_mode = 2
-text = "即将开始"
-horizontal_alignment = 1

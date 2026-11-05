@@ -91,6 +91,7 @@ func _load_cache() -> void:
 	var root := packed.instantiate()
 	for c in root.get_children():
 		root.remove_child(c)
+		c.owner = null
 		add_child(c)
 		if Engine.is_editor_hint():
 			c.owner = owner if owner != null else get_parent()

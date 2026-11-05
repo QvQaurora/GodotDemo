@@ -58,6 +58,9 @@ static func spawn(
 	_import_anim_clip(lib, "res://assets/kenney_characters/Animations/run.fbx", "Root|Run", "run", true)
 	_import_anim_clip(lib, "res://assets/kenney_characters/Animations/jump.fbx", "Root|Jump", "jump", false)
 	_import_anim_clip(lib, "res://assets/kenney_characters/Animations/attack.fbx", "Scene", "attack", false)
+	# Trim FBX end-pose hitch; punch is applied as an upper-body overlay in player.gd.
+	if lib.has_animation("attack"):
+		_trim_anim_last_keyframe(lib.get_animation("attack"))
 	if anim.has_animation("idle"):
 		anim.play("idle")
 
@@ -257,6 +260,19 @@ static func _import_anim_clip(lib: AnimationLibrary, res_path: String, src_name:
 	anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
 	lib.add_animation(dest_name, anim)
 	scene.free()
+
+
+static func _trim_anim_last_keyframe(anim: Animation) -> void:
+	## Drop keys on the final frame (avoids FBX end-pose hitch) and shrink length by one step.
+	var step := anim.step if anim.step > 0.0 else (1.0 / 24.0)
+	var cut := anim.length - step
+	if cut <= 0.05:
+		return
+	for i in anim.get_track_count():
+		for k in range(anim.track_get_key_count(i) - 1, -1, -1):
+			if anim.track_get_key_time(i, k) > cut + 0.0001:
+				anim.track_remove_key(i, k)
+	anim.length = cut
 
 
 static func _combined_aabb(node: Node) -> AABB:

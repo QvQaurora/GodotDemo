@@ -485,11 +485,14 @@ func _physics_process(delta: float) -> void:
 
 
 func _process(_delta: float) -> void:
-	# After AnimationPlayer pose update: keep head collapsed in first person.
+	# After AnimationPlayer pose update: overlay punch on upper body, then hide FP head.
+	if _attack_t >= 0.0:
+		if _has_attack_clip():
+			_apply_attack_upper_body_overlay()
+		else:
+			_apply_attack_arm_pose()
 	if _cam_mode == CamMode.FIRST:
 		_set_first_person_head_hidden(true)
-	if _attack_t >= 0.0 and not _has_attack_clip():
-		_apply_attack_arm_pose()
 
 
 func _has_attack_clip() -> bool:
@@ -502,20 +505,17 @@ func _attack_duration() -> float:
 
 func _begin_attack() -> void:
 	## Keep current facing — do not snap the mesh toward the camera.
+	## Locomotion (idle/run/jump) keeps playing; punch is overlaid on upper body in _process.
 	_attack_t = 0.0
 	_attack_hit_done = false
-	var speed := 1.0
 	_attack_play_len = 0.36
 	if _has_attack_clip():
 		var raw := maxf(_anim.get_animation("attack").length, 0.2)
 		# Long exports (e.g. timeline end at 250) get sped up so the punch is watchable.
 		if raw > ATTACK_TARGET_LEN:
-			speed = raw / ATTACK_TARGET_LEN
 			_attack_play_len = ATTACK_TARGET_LEN
 		else:
 			_attack_play_len = raw
-		_current_anim = ""
-		_play_anim("attack", speed)
 	_attack_cd = maxf(attack_cooldown, _attack_play_len * 0.85)
 
 
@@ -614,6 +614,68 @@ func _add_bone_euler(bone_name: String, euler: Vector3) -> void:
 	_skeleton.set_bone_pose_rotation(bi, cur * Quaternion.from_euler(euler))
 
 
+func _is_upper_body_attack_bone(bone: String) -> bool:
+	## Arms / hands / shoulders only — legs & hips stay on idle/run/jump.
+	if bone.contains("Leg") or bone.contains("Foot") or bone.contains("Toe") \
+			or bone.contains("Heel") or bone.contains("Knee") or bone.contains("Hips"):
+		return false
+	return (
+		bone.contains("Shoulder")
+		or bone.contains("Arm")
+		or bone.contains("Hand")
+		or bone.contains("ForeArm")
+		or bone.contains("Thumb")
+		or bone.contains("Index")
+		or bone.contains("Middle")
+		or bone.contains("Ring")
+		or bone.contains("Pinky")
+	)
+
+
+func _attack_overlay_weight(u: float) -> float:
+	## Soft in/out so the punch doesn't pop against locomotion arms.
+	var w := 1.0
+	if u < 0.08:
+		w = u / 0.08
+	elif u > 0.82:
+		w = (1.0 - u) / 0.18
+	return clampf(w, 0.0, 1.0)
+
+
+func _apply_attack_upper_body_overlay() -> void:
+	## Sample the attack clip onto upper-body bones while locomotion keeps driving the legs.
+	if _skeleton == null or _anim == null or not _anim.has_animation("attack"):
+		return
+	var clip: Animation = _anim.get_animation("attack")
+	var dur := maxf(_attack_play_len, 0.01)
+	var u := clampf(_attack_t / dur, 0.0, 1.0)
+	var weight := _attack_overlay_weight(u)
+	if weight <= 0.001:
+		return
+	var sample_t := u * clip.length
+	for i in clip.get_track_count():
+		var tp := str(clip.track_get_path(i))
+		var bone := tp.get_slice(":", 1) if tp.contains(":") else tp.get_file()
+		if not _is_upper_body_attack_bone(bone):
+			continue
+		var bi := _skeleton.find_bone(bone)
+		if bi < 0:
+			continue
+		match clip.track_get_type(i):
+			Animation.TYPE_ROTATION_3D:
+				var attack_q: Quaternion = clip.rotation_track_interpolate(i, sample_t)
+				var cur_q := _skeleton.get_bone_pose_rotation(bi)
+				_skeleton.set_bone_pose_rotation(bi, cur_q.slerp(attack_q, weight))
+			Animation.TYPE_POSITION_3D:
+				var attack_p: Vector3 = clip.position_track_interpolate(i, sample_t)
+				var cur_p := _skeleton.get_bone_pose_position(bi)
+				_skeleton.set_bone_pose_position(bi, cur_p.lerp(attack_p, weight))
+			Animation.TYPE_SCALE_3D:
+				var attack_s: Vector3 = clip.scale_track_interpolate(i, sample_t)
+				var cur_s := _skeleton.get_bone_pose_scale(bi)
+				_skeleton.set_bone_pose_scale(bi, cur_s.lerp(attack_s, weight))
+
+
 func _face_move_direction(world_dir: Vector3, delta: float) -> void:
 	# Camera stays on the body; only the mesh turns to face movement (S → face the camera).
 	var local_move := global_transform.basis.inverse() * world_dir
@@ -630,9 +692,7 @@ func _face_move_direction(world_dir: Vector3, delta: float) -> void:
 func _update_animation(running: bool) -> void:
 	if _anim == null:
 		return
-	# Hold Mixamo/Kenney attack clip until it finishes.
-	if _attack_t >= 0.0 and _current_anim == "attack":
-		return
+	# Attack is an upper-body overlay — never block idle/run/jump.
 	var horiz := Vector3(velocity.x, 0.0, velocity.z).length()
 	var on_floor := _air_height <= 0.001
 	if not on_floor and _current_anim == "jump" and _anim.is_playing():

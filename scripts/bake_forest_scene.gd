@@ -120,6 +120,12 @@ static func bake_live_main(main: Node3D, out_path: String = OUT_PATH) -> String:
 	# (KenneyVisual, etc.) into the .tscn — that causes editor load conflicts.
 	_reinstance_packed_children(main)
 
+	# Never bake the runtime boot overlay into the saved scene.
+	for c in main.get_children():
+		if str(c.name) == "BootOverlay":
+			main.remove_child(c)
+			c.free()
+
 	# Runtime-created nodes need owner set or PackedScene.pack drops them.
 	# Do NOT recurse into PackedScene instances — only own the instance root.
 	_set_owner_recursive(main, main)
