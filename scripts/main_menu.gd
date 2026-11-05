@@ -1,5 +1,5 @@
 extends Control
-## Start menu: new game (map pick) / saves / settings / quit.
+## Start menu: new game (map pick) / player look / saves / settings / quit.
 
 const LOADING_SCENE := "res://scenes/loading.tscn"
 const _BakedCacheSeed = preload("res://scripts/baked_cache_seed.gd")
@@ -8,13 +8,16 @@ const _MapCatalog = preload("res://scripts/map_catalog.gd")
 @onready var main_buttons: VBoxContainer = $Center/Panel/Margin/MainButtons
 @onready var settings_host: MarginContainer = $Center/Panel/Margin/SettingsHost
 @onready var save_host: MarginContainer = $Center/Panel/Margin/SaveHost
+@onready var player_host: MarginContainer = $Center/Panel/Margin/PlayerHost
 @onready var map_host: MarginContainer = $Center/Panel/Margin/MapHost
 @onready var start_btn: Button = $Center/Panel/Margin/MainButtons/StartButton
+@onready var player_btn: Button = $Center/Panel/Margin/MainButtons/PlayerButton
 @onready var save_btn: Button = $Center/Panel/Margin/MainButtons/SaveButton
 @onready var settings_btn: Button = $Center/Panel/Margin/MainButtons/SettingsButton
 @onready var quit_btn: Button = $Center/Panel/Margin/MainButtons/QuitButton
 @onready var settings_panel: VBoxContainer = $Center/Panel/Margin/SettingsHost/SettingsPanel
 @onready var save_menu: VBoxContainer = $Center/Panel/Margin/SaveHost/SaveMenu
+@onready var character_customize: VBoxContainer = $Center/Panel/Margin/PlayerHost/CharacterCustomize
 @onready var map_list: VBoxContainer = $Center/Panel/Margin/MapHost/MapSelect/Scroll/List
 @onready var map_back_btn: Button = $Center/Panel/Margin/MapHost/MapSelect/BackButton
 @onready var panel: PanelContainer = $Center/Panel
@@ -28,6 +31,7 @@ func _ready() -> void:
 	_BakedCacheSeed.seed_all()
 
 	start_btn.pressed.connect(_on_start)
+	player_btn.pressed.connect(_on_open_player)
 	save_btn.pressed.connect(_on_open_saves)
 	settings_btn.pressed.connect(_on_open_settings)
 	quit_btn.pressed.connect(_on_quit)
@@ -38,6 +42,7 @@ func _ready() -> void:
 	save_menu.configure(false, true)
 	save_menu.back_pressed.connect(_on_close_save_menu)
 	save_menu.request_load_from_title.connect(_on_load_slot_from_title)
+	character_customize.back_pressed.connect(_on_close_player)
 
 	_build_map_list()
 	_show_main()
@@ -58,6 +63,9 @@ func _input(event: InputEvent) -> void:
 	elif save_host.visible:
 		_on_close_save_menu()
 		get_viewport().set_input_as_handled()
+	elif player_host.visible:
+		_on_close_player()
+		get_viewport().set_input_as_handled()
 	elif map_host.visible:
 		_on_close_map_select()
 		get_viewport().set_input_as_handled()
@@ -67,9 +75,11 @@ func _show_main() -> void:
 	main_buttons.visible = true
 	settings_host.visible = false
 	save_host.visible = false
+	player_host.visible = false
 	map_host.visible = false
 	settings_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	save_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	map_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.custom_minimum_size = Vector2(520, 0)
 	_set_main_buttons_enabled(true)
@@ -79,8 +89,10 @@ func _show_main() -> void:
 func _show_settings() -> void:
 	main_buttons.visible = false
 	save_host.visible = false
+	player_host.visible = false
 	map_host.visible = false
 	save_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	map_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	settings_host.visible = true
 	settings_host.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -91,8 +103,10 @@ func _show_settings() -> void:
 func _show_saves() -> void:
 	main_buttons.visible = false
 	settings_host.visible = false
+	player_host.visible = false
 	map_host.visible = false
 	settings_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	map_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	save_host.visible = true
 	save_host.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -101,12 +115,29 @@ func _show_saves() -> void:
 	save_menu.focus_primary()
 
 
+func _show_player() -> void:
+	main_buttons.visible = false
+	settings_host.visible = false
+	save_host.visible = false
+	map_host.visible = false
+	settings_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	save_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	map_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_host.visible = true
+	player_host.mouse_filter = Control.MOUSE_FILTER_STOP
+	panel.custom_minimum_size = Vector2(920, 0)
+	character_customize.sync_from_settings()
+	character_customize.focus_primary()
+
+
 func _show_map_select() -> void:
 	main_buttons.visible = false
 	settings_host.visible = false
 	save_host.visible = false
+	player_host.visible = false
 	settings_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	save_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	player_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	map_host.visible = true
 	map_host.mouse_filter = Control.MOUSE_FILTER_STOP
 	panel.custom_minimum_size = Vector2(640, 0)
@@ -115,6 +146,7 @@ func _show_map_select() -> void:
 
 func _set_main_buttons_enabled(enabled: bool) -> void:
 	start_btn.disabled = not enabled
+	player_btn.disabled = not enabled
 	save_btn.disabled = not enabled
 	settings_btn.disabled = not enabled
 	quit_btn.disabled = not enabled
@@ -125,7 +157,6 @@ func _build_map_list() -> void:
 		child.queue_free()
 	var last_cat := ""
 	for entry in _MapCatalog.entries():
-		# Hide maps that are not open yet (placeholders stay in catalog for later).
 		if not bool(entry.get("ready", false)):
 			continue
 		var cat := str(entry.get("category", ""))
@@ -164,6 +195,10 @@ func _on_map_chosen(map_id: String, scene_path: String, btn: Button) -> void:
 	get_tree().change_scene_to_file(LOADING_SCENE)
 
 
+func _on_open_player() -> void:
+	_show_player()
+
+
 func _on_open_saves() -> void:
 	_show_saves()
 
@@ -180,6 +215,11 @@ func _on_close_settings() -> void:
 func _on_close_save_menu() -> void:
 	_show_main()
 	save_btn.grab_focus()
+
+
+func _on_close_player() -> void:
+	_show_main()
+	player_btn.grab_focus()
 
 
 func _on_close_map_select() -> void:

@@ -54,6 +54,12 @@ var mouse_sensitivity: float = 1.0
 ## action_id -> Key keycode
 var keybinds: Dictionary = {}
 
+# Player appearance (Kenney Animated Characters)
+var player_body_id: String = "medium"
+var player_outfit_id: String = "skaterMaleA"
+## slot_id -> accessory_id (empty = none)
+var player_gear: Dictionary = {}
+
 const KEYBIND_ACTIONS: Array[Dictionary] = [
 	{"id": "interact", "label": "互动 / 拾取"},
 	{"id": "map", "label": "打开地图"},
@@ -230,6 +236,13 @@ func load_settings() -> void:
 		if code == KEY_NONE or code == 0:
 			code = int(default_keybinds().get(id, KEY_NONE))
 		keybinds[id] = code
+	player_body_id = str(cfg.get_value("player", "body_id", "medium"))
+	player_outfit_id = str(cfg.get_value("player", "outfit_id", "skaterMaleA"))
+	player_gear = {}
+	if cfg.has_section_key("player", "gear_json"):
+		var parsed: Variant = JSON.parse_string(str(cfg.get_value("player", "gear_json", "{}")))
+		if typeof(parsed) == TYPE_DICTIONARY:
+			player_gear = parsed
 	save_settings()
 
 
@@ -301,6 +314,9 @@ func save_settings() -> void:
 	for action in KEYBIND_ACTIONS:
 		var id: String = action["id"]
 		cfg.set_value("controls", "key_%s" % id, int(keybinds.get(id, KEY_NONE)))
+	cfg.set_value("player", "body_id", player_body_id)
+	cfg.set_value("player", "outfit_id", player_outfit_id)
+	cfg.set_value("player", "gear_json", JSON.stringify(player_gear))
 	cfg.save(CONFIG_PATH)
 
 

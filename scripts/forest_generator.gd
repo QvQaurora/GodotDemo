@@ -27,8 +27,6 @@ const _BakedCacheSeed = preload("res://scripts/baked_cache_seed.gd")
 @export var monster_count: int = 55
 @export var ground_normal_scale: float = 0.9
 @export var treasure_count: int = 48
-## Optional Blender-authored scenery (terrain/trees/roads/ponds). Gameplay heightmap + actors/treasures still run.
-@export var blender_world: PackedScene
 @export var use_terrain_cache: bool = true
 @export var use_placement_cache: bool = true
 @export var chunk_size: float = 64.0
@@ -91,333 +89,7 @@ func _on_settings_changed_stream() -> void:
 
 
 func get_terrain_height(x: float, z: float) -> float:
-	if blender_world != null and has_node("BlenderWorld"):
-		var hit := _raycast_blender_ground_y(x, z)
-		if not is_nan(hit):
-			return hit
 	return _height_at(x, z)
-
-
-func _instance_blender_world() -> void:
-	if blender_world == null:
-		# Exported builds sometimes drop the PackedScene export; load explicitly.
-		const BLENDER_WORLD_PATH := "res://assets/blender_forest/forest_world.glb"
-		if ResourceLoader.exists(BLENDER_WORLD_PATH):
-			blender_world = load(BLENDER_WORLD_PATH) as PackedScene
-			print("Blender world loaded from path fallback: ", BLENDER_WORLD_PATH)
-		else:
-			print("Blender world missing: ", BLENDER_WORLD_PATH)
-			return
-	if has_node("BlenderWorld"):
-		return
-	var root := blender_world.instantiate()
-	root.name = "BlenderWorld"
-	add_child(root)
-	_sanitize_blender_world(root)
-	_bake_blender_mesh_scales(root)
-	_retint_blender_world_materials(root)
-	_add_blender_world_collision(root)
-	print("Blender forest scenery instanced: ", blender_world.resource_path, " children=", root.get_child_count())
-
-
-func _sanitize_blender_world(root: Node) -> void:
-	## Kenney path tiles z-fight with Terrain and show as blue/brown colormap stripes.
-	## RiverWater was exported as a 1520×56 sheet that rides the rim heights and floats.
-	var drop: Array[Node] = []
-	for node in root.find_children("*", "MeshInstance3D", true, false):
-		var n := String(node.name).to_lower()
-		if n.find("road") >= 0 or n.find("path") >= 0 or n.find("river") >= 0:
-			drop.append(node)
-	for node in drop:
-		var p := node.get_parent()
-		if p:
-			p.remove_child(node)
-		node.free()
-
-
-func _bake_blender_mesh_scales(root: Node) -> void:
-	## Joined Kenney chunks keep the first instance's scale (often 8–14×). Visuals look
-	## correct, but ConcavePolygonShape3D ignores Node scale — collision stays tiny and
-	## the player walks through trees/houses while bumping invisible leftovers near origins.
-	var baked_n := 0
-	for node in root.find_children("*", "MeshInstance3D", true, false):
-		var mi := node as MeshInstance3D
-		if mi == null or mi.mesh == null:
-			continue
-		if mi.scale.is_equal_approx(Vector3.ONE):
-			continue
-		var scl := mi.scale
-		var src := mi.mesh
-		var out := ArrayMesh.new()
-		for si in src.get_surface_count():
-			var mdt := MeshDataTool.new()
-			if mdt.create_from_surface(src, si) != OK:
-				continue
-			for vi in mdt.get_vertex_count():
-				var v := mdt.get_vertex(vi)
-				mdt.set_vertex(vi, Vector3(v.x * scl.x, v.y * scl.y, v.z * scl.z))
-				if mdt.get_format() & Mesh.ARRAY_FORMAT_NORMAL:
-					var nrm := mdt.get_vertex_normal(vi)
-					# Uniform scale keeps normals; non-uniform would need inverse-transpose.
-					if not is_equal_approx(scl.x, scl.y) or not is_equal_approx(scl.y, scl.z):
-						nrm = Vector3(nrm.x / scl.x, nrm.y / scl.y, nrm.z / scl.z).normalized()
-						mdt.set_vertex_normal(vi, nrm)
-			mdt.commit_to_surface(out)
-			var mat := src.surface_get_material(si)
-			if mat == null:
-				mat = mi.get_active_material(si)
-			if mat != null:
-				out.surface_set_material(out.get_surface_count() - 1, mat)
-		mi.mesh = out
-		mi.scale = Vector3.ONE
-		baked_n += 1
-	print("Blender mesh scales baked: ", baked_n)
-
-
-func _add_blender_world_collision(root: Node) -> void:
-	## Build physics for Blender scenery. Trimesh shapes do NOT honor CollisionShape scale,
-	## so shapes are created in mesh-local space and parented under each MeshInstance3D.
-	## Layer 8 = walkable terrain (player sticks via height; SpringArm uses it).
-	## Layer 1 = solid props the player capsule bumps into.
-	##
-	## IMPORTANT: do NOT invent proxy boxes from Blender XY — GLB Y-up remaps axes and
-	## those boxes become invisible air walls while the real meshes stay walk-through.
-	var added := 0
-	for node in root.find_children("*", "MeshInstance3D", true, false):
-		var mi := node as MeshInstance3D
-		if mi == null or mi.mesh == null:
-			continue
-		var n := String(mi.name).to_lower()
-		# Skip overlays that are not solid blockers.
-		if n.find("water") >= 0 or n.find("road") >= 0 or n.find("path") >= 0:
-			continue
-		if n.find("pond") >= 0 or n.find("river") >= 0 or n.find("bush") >= 0:
-			continue
-		if mi.get_node_or_null("ColBody") != null:
-			continue
-		var shape := _make_mesh_collision_shape(mi)
-		if shape == null:
-			continue
-		var is_terrain := n.find("terrain") >= 0 or n.find("grid") >= 0
-		var body := StaticBody3D.new()
-		body.name = "ColBody"
-		body.collision_layer = 8 if is_terrain else 1
-		body.collision_mask = 0
-		var col := CollisionShape3D.new()
-		col.shape = shape
-		body.add_child(col)
-		mi.add_child(body)
-		added += 1
-	print("Blender world collision bodies: ", added)
-
-
-func _make_mesh_collision_shape(mi: MeshInstance3D) -> Shape3D:
-	if mi.mesh == null:
-		return null
-	var tri := mi.mesh.create_trimesh_shape()
-	if tri == null:
-		return null
-	# Default backface_collision=false lets the capsule slip through flipped/open meshes.
-	if tri is ConcavePolygonShape3D:
-		(tri as ConcavePolygonShape3D).backface_collision = true
-	return tri
-
-
-func _raycast_blender_ground_y(x: float, z: float) -> float:
-	## Only hit terrain layer 8 — never tree canopies / roofs on layer 1.
-	var space := get_world_3d().direct_space_state
-	if space == null:
-		return NAN
-	var from := Vector3(x, 500.0, z)
-	var to := Vector3(x, -200.0, z)
-	var q := PhysicsRayQueryParameters3D.create(from, to)
-	q.collision_mask = 8
-	q.collide_with_areas = false
-	q.collide_with_bodies = true
-	var hit := space.intersect_ray(q)
-	if hit.is_empty():
-		return NAN
-	return float(hit["position"].y)
-
-
-func _resync_heightmap_from_blender_mesh() -> void:
-	## Procedural heightmap ≠ Blender Terrain. Grass/actors/_stamp_height all use
-	## `_heights`, so rebuild them from the Terrain mesh or the player/grass sink.
-	if not has_node("BlenderWorld"):
-		return
-	var terrain: MeshInstance3D = null
-	for node in $BlenderWorld.find_children("*", "MeshInstance3D", true, false):
-		var mi := node as MeshInstance3D
-		if mi and mi.mesh and String(mi.name).to_lower().find("terrain") >= 0:
-			terrain = mi
-			break
-	if terrain == null or terrain.mesh == null:
-		print("Blender height resync skipped: no Terrain mesh")
-		return
-	var arrays := terrain.mesh.surface_get_arrays(0)
-	if arrays.is_empty() or arrays[Mesh.ARRAY_VERTEX] == null:
-		return
-	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
-	if verts.is_empty():
-		return
-	# Bin vertex world Y by coarse XZ cells, keep max (top surface).
-	var cell := 4.0
-	var bins: Dictionary = {} # Vector2i -> float
-	var xform := terrain.global_transform
-	for v in verts:
-		var g: Vector3 = xform * v
-		var key := Vector2i(int(floor(g.x / cell)), int(floor(g.z / cell)))
-		if bins.has(key):
-			bins[key] = maxf(float(bins[key]), g.y)
-		else:
-			bins[key] = g.y
-	var half := terrain_size * 0.5
-	var filled := 0
-	for zi in _height_res:
-		for xi in _height_res:
-			var x := -half + terrain_size * float(xi) / float(_height_res - 1)
-			var z := -half + terrain_size * float(zi) / float(_height_res - 1)
-			var y := _sample_binned_height(bins, cell, x, z)
-			if is_nan(y):
-				continue
-			_heights[zi * _height_res + xi] = y
-			if not _natural_heights.is_empty() and zi * _height_res + xi < _natural_heights.size():
-				_natural_heights[zi * _height_res + xi] = y
-			filled += 1
-	print("Blender heightmap resynced: ", filled, "/", _heights.size(), " samples cell=", cell)
-
-
-func _sample_binned_height(bins: Dictionary, cell: float, x: float, z: float) -> float:
-	var fx := x / cell
-	var fz := z / cell
-	var x0 := int(floor(fx))
-	var z0 := int(floor(fz))
-	# 3x3 search for nearest filled bin (mesh density varies).
-	var best_y := NAN
-	var best_d := INF
-	for dz in range(-2, 3):
-		for dx in range(-2, 3):
-			var key := Vector2i(x0 + dx, z0 + dz)
-			if not bins.has(key):
-				continue
-			var cx := (float(key.x) + 0.5) * cell
-			var cz := (float(key.y) + 0.5) * cell
-			var d := (cx - x) * (cx - x) + (cz - z) * (cz - z)
-			if d < best_d:
-				best_d = d
-				best_y = float(bins[key])
-	return best_y
-
-
-func _rebuild_blender_river_water() -> void:
-	## Replace the broken Blender RiverWater (oversized + rim-lifted) with a strip
-	## that follows the resynced trench inside the terrain bounds.
-	if not has_node("BlenderWorld"):
-		return
-	var bw: Node = $BlenderWorld
-	var drop: Array[Node] = []
-	for node in bw.find_children("*", "MeshInstance3D", true, false):
-		if String(node.name).to_lower().find("river") >= 0:
-			drop.append(node)
-	for node in drop:
-		var p := node.get_parent()
-		if p:
-			p.remove_child(node)
-		node.free()
-	# Blender RIVER_Y=-90 with Yup export → Godot Z≈+90.
-	const RIVER_Z := 90.0
-	const HALF_W := 13.0
-	const X0 := -380.0
-	const X1 := 380.0
-	const SEGS := 56
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for i in SEGS:
-		var t0 := float(i) / float(SEGS)
-		var t1 := float(i + 1) / float(SEGS)
-		var xa := lerpf(X0, X1, t0)
-		var xb := lerpf(X0, X1, t1)
-		var z0 := RIVER_Z - HALF_W
-		var z1 := RIVER_Z + HALF_W
-		var y00 := _height_at(xa, z0) + 0.4
-		var y01 := _height_at(xa, z1) + 0.4
-		var y10 := _height_at(xb, z0) + 0.4
-		var y11 := _height_at(xb, z1) + 0.4
-		var a := Vector3(xa, y00, z0)
-		var b := Vector3(xb, y10, z0)
-		var c := Vector3(xb, y11, z1)
-		var d := Vector3(xa, y01, z1)
-		st.set_normal(Vector3.UP)
-		st.add_vertex(a)
-		st.add_vertex(b)
-		st.add_vertex(c)
-		st.add_vertex(a)
-		st.add_vertex(c)
-		st.add_vertex(d)
-	st.generate_normals()
-	var mesh := st.commit()
-	var mat := StandardMaterial3D.new()
-	mat.resource_name = "M_Water"
-	mat.albedo_color = Color(0.12, 0.34, 0.48, 0.72)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.roughness = 0.12
-	mat.metallic = 0.25
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	if mesh.get_surface_count() > 0:
-		mesh.surface_set_material(0, mat)
-	var mi := MeshInstance3D.new()
-	mi.name = "RiverWater"
-	mi.mesh = mesh
-	bw.add_child(mi)
-	print("Blender river water rebuilt segs=", SEGS)
-
-
-func _snap_blender_pond_water() -> void:
-	## Keep pond discs seated just above the resynced basin surface.
-	if not has_node("BlenderWorld"):
-		return
-	for node in $BlenderWorld.find_children("*", "MeshInstance3D", true, false):
-		var mi := node as MeshInstance3D
-		if mi == null or mi.mesh == null:
-			continue
-		if String(mi.name).to_lower().find("pond") < 0:
-			continue
-		var src := mi.mesh
-		var out := ArrayMesh.new()
-		for si in src.get_surface_count():
-			var mdt := MeshDataTool.new()
-			if mdt.create_from_surface(src, si) != OK:
-				continue
-			# Use disc center XZ; set a shared water level from terrain.
-			var cx := 0.0
-			var cz := 0.0
-			var vc := mdt.get_vertex_count()
-			if vc <= 0:
-				continue
-			for vi in vc:
-				var v := mdt.get_vertex(vi)
-				var g: Vector3 = mi.global_transform * v
-				cx += g.x
-				cz += g.z
-			cx /= float(vc)
-			cz /= float(vc)
-			var water_y := _height_at(cx, cz) + 0.35
-			for vi in vc:
-				var v2 := mdt.get_vertex(vi)
-				var g2: Vector3 = mi.global_transform * v2
-				var local: Vector3 = mi.global_transform.affine_inverse() * Vector3(g2.x, water_y, g2.z)
-				mdt.set_vertex(vi, local)
-			mdt.commit_to_surface(out)
-			var mat := src.surface_get_material(si)
-			if mat == null:
-				mat = mi.get_active_material(si)
-			if mat != null:
-				out.surface_set_material(out.get_surface_count() - 1, mat)
-		mi.mesh = out
-
-
-func is_pickup_collected(pickup_id: String) -> bool:
-	return _collected_pickups.has(pickup_id)
 
 
 func _build_world_async() -> void:
@@ -432,34 +104,18 @@ func _build_world_async() -> void:
 	# Peaks are deterministic from seed; rebuild list even on terrain cache hits (for map).
 	_collect_mountain_peaks()
 	await get_tree().process_frame
-	_instance_blender_world()
 	_build_ground()
-	if blender_world != null:
-		var ground_vis := get_node_or_null("Ground")
-		if ground_vis is VisualInstance3D:
-			(ground_vis as VisualInstance3D).visible = false
-		# Procedural GroundBody heightfield ≠ Blender Terrain — turn it off.
-		var ground_body := get_node_or_null("GroundBody")
-		if ground_body is CollisionObject3D:
-			(ground_body as CollisionObject3D).collision_layer = 0
-		_resync_heightmap_from_blender_mesh()
-		_rebuild_blender_river_water()
-		_snap_blender_pond_water()
 	_build_world_bounds()
-	# Physics bodies need a frame before terrain raycasts succeed.
-	await get_tree().physics_frame
-	await get_tree().physics_frame
 	_place_player_on_spawn()
 	await get_tree().process_frame
-	if blender_world == null:
-		_build_road_markings()
-		_build_traffic_lights()
-		await get_tree().process_frame
-		_build_pond_meshes()
-		await get_tree().process_frame
-		_build_houses()
-		await get_tree().process_frame
-	# 2/3/4) Chunk streaming + collision LOD + deferred actors/pickups.
+	_build_road_markings()
+	_build_traffic_lights()
+	await get_tree().process_frame
+	_build_pond_meshes()
+	await get_tree().process_frame
+	_build_houses()
+	await get_tree().process_frame
+	# Chunk streaming + collision LOD + deferred actors/pickups.
 	_setup_world_streamer()
 	apply_streaming_budget(GameSettings.streaming_budget())
 	await _load_streamer_meshes_only()
@@ -467,12 +123,11 @@ func _build_world_async() -> void:
 	await _prewarm_runtime_assets()
 	await get_tree().process_frame
 	if not _try_load_placement_cache():
-		if blender_world == null:
-			await _prepare_forest_chunks()
-			await get_tree().process_frame
-			await _prepare_rock_chunks()
-			await _prepare_bush_chunks()
-			await get_tree().process_frame
+		await _prepare_forest_chunks()
+		await get_tree().process_frame
+		await _prepare_rock_chunks()
+		await _prepare_bush_chunks()
+		await get_tree().process_frame
 		await _prepare_actor_spawns()
 		_prepare_treasure_spawns()
 		_save_placement_cache()
@@ -484,16 +139,15 @@ func _build_world_async() -> void:
 	world_built.emit()
 	print("World stream ready")
 
+
 func _terrain_cache_key() -> String:
 	return "m%d_h%d_r%d" % [mountain_count, int(mountain_height), int(mountain_radius)]
 
 
 func _placement_cache_key() -> String:
-	# "u4f" = even tree coverage; "trv2" = Kenney treasure meshes + value.
-	# "bl2" = Blender scenery + grass clamped to terrain bounds.
-	var tag := "bl2" if blender_world != null else "u4f"
-	return "%s_trv2_m%d_h%d_r%d_t%d_r%d_b%d_a%d_m%d_tr%d" % [
-		tag, mountain_count, int(mountain_height), int(mountain_radius),
+	# "u4f" = even tree coverage; "trv2" = Kenney treasures; "chk1" = chunked Kenney (no whole-map Blender).
+	return "u4f_chk1_trv2_m%d_h%d_r%d_t%d_r%d_b%d_a%d_m%d_tr%d" % [
+		mountain_count, int(mountain_height), int(mountain_radius),
 		tree_count, 220, 420, animal_count, monster_count, treasure_count
 	]
 
@@ -1080,7 +734,7 @@ func _natural_height_at(x: float, z: float) -> float:
 
 
 func _stamp_height(p: Vector3) -> Vector3:
-	# After Blender resync, `_height_at` matches the visible Terrain surface.
+	# Stamp XZ onto the procedural heightfield.
 	return Vector3(p.x, _height_at(p.x, p.z), p.z)
 
 
@@ -1489,29 +1143,6 @@ func _retint_kenney_nature_material(bm: BaseMaterial3D) -> void:
 		else:
 			bm.albedo_color = Color(0.50, 0.33, 0.18)
 	# Flowers / rocks / other named mats keep authored colors (only demetalize above).
-
-
-func _retint_blender_world_materials(root: Node) -> void:
-	## Joined Blender scenery keeps Nature Kit mint leaves + metallic=1; fix in place.
-	var seen: Dictionary = {}
-	var n := 0
-	for node in root.find_children("*", "MeshInstance3D", true, false):
-		var mi := node as MeshInstance3D
-		if mi == null or mi.mesh == null:
-			continue
-		for si in mi.mesh.get_surface_count():
-			var mat := mi.mesh.surface_get_material(si)
-			if mat == null:
-				mat = mi.get_active_material(si)
-			if mat == null or not (mat is BaseMaterial3D):
-				continue
-			var id := mat.get_instance_id()
-			if seen.has(id):
-				continue
-			seen[id] = true
-			_retint_kenney_nature_material(mat as BaseMaterial3D)
-			n += 1
-	print("Blender world materials retinted: ", n)
 
 
 func _load_kenney_texture(res_path: String) -> Texture2D:

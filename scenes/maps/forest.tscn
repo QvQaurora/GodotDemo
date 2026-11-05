@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3 uid="uid://bforest1000main"]
+[gd_scene load_steps=13 format=3 uid="uid://bforest1000main"]
 
 [ext_resource type="Script" path="res://scripts/forest_generator.gd" id="1_forest"]
 [ext_resource type="PackedScene" path="res://scenes/player.tscn" id="2_player"]
@@ -8,7 +8,6 @@
 [ext_resource type="PackedScene" path="res://scenes/world_map.tscn" id="7_map"]
 [ext_resource type="Script" path="res://scripts/cloud_layer.gd" id="8_clouds"]
 [ext_resource type="Script" path="res://scripts/player_hud.gd" id="9_hud"]
-[ext_resource type="PackedScene" path="res://assets/blender_forest/forest_world.glb" id="10_blender"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
 sky_top_color = Color(0.28, 0.55, 0.92, 1)
@@ -100,11 +99,9 @@ mountain_count = 8
 mountain_height = 48.0
 mountain_radius = 95.0
 grass_count = 10000
-grass_per_chunk = 0
 grass_tile_meters = 3.5
 ground_normal_scale = 0.9
 treasure_count = 48
-blender_world = ExtResource("10_blender")
 
 [node name="Player" parent="." instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.0, 0)

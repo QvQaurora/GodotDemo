@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3 uid="uid://cmainmenuforest"]
+[gd_scene load_steps=5 format=3 uid="uid://cmainmenuforest"]
 
 [ext_resource type="Script" path="res://scripts/main_menu.gd" id="1_menu"]
 [ext_resource type="PackedScene" path="res://scenes/settings_panel.tscn" id="2_settings"]
 [ext_resource type="PackedScene" path="res://scenes/save_menu.tscn" id="3_save"]
+[ext_resource type="PackedScene" path="res://scenes/character_customize.tscn" id="4_player"]
 
 [node name="MainMenu" type="Control"]
 layout_mode = 3
@@ -82,6 +83,13 @@ focus_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "开始游戏"
 
+[node name="PlayerButton" type="Button" parent="Center/Panel/Margin/MainButtons"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+focus_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "玩家"
+
 [node name="SaveButton" type="Button" parent="Center/Panel/Margin/MainButtons"]
 custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
@@ -117,6 +125,14 @@ layout_mode = 2
 mouse_filter = 2
 
 [node name="SaveMenu" parent="Center/Panel/Margin/SaveHost" instance=ExtResource("3_save")]
+layout_mode = 2
+
+[node name="PlayerHost" type="MarginContainer" parent="Center/Panel/Margin"]
+visible = false
+layout_mode = 2
+mouse_filter = 2
+
+[node name="CharacterCustomize" parent="Center/Panel/Margin/PlayerHost" instance=ExtResource("4_player")]
 layout_mode = 2
 
 [node name="MapHost" type="MarginContainer" parent="Center/Panel/Margin"]

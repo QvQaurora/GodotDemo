@@ -11,6 +11,9 @@ extends CharacterBody3D
 @export var character_path: String = "res://assets/kenney_characters/characterMedium.fbx"
 @export var skin_path: String = "res://assets/kenney_characters/Skins/skaterMaleA.png"
 @export var character_height: float = 1.8
+
+const _Catalog = preload("res://scripts/character_catalog.gd")
+const _Builder = preload("res://scripts/kenney_character_builder.gd")
 @export var attack_range: float = 2.2
 @export var attack_radius: float = 1.05
 @export var attack_damage: float = 1.0
@@ -635,55 +638,31 @@ func _play_anim(anim_name: String, speed_scale: float = 1.0) -> void:
 
 
 func _load_kenney_character() -> void:
-	for child in model.get_children():
-		child.queue_free()
 	_anim = null
 	_visual = null
 	_skeleton = null
 	_head_bones.clear()
+	_current_anim = ""
 
-	# load() follows import remaps — required for exported PCK builds.
-	var packed := load(character_path) as PackedScene
-	if packed == null:
-		push_warning("Kenney character missing: " + character_path)
+	# Prefer appearance chosen in the main-menu 玩家 panel.
+	var body_id := _Catalog.resolve_existing_body_id(GameSettings.player_body_id)
+	var outfit_id := _Catalog.resolve_existing_outfit_id(GameSettings.player_outfit_id)
+	var gear := _Catalog.sanitize_gear(GameSettings.player_gear)
+	character_path = _Catalog.body_path(body_id)
+	skin_path = _Catalog.skin_path(outfit_id)
+	character_height = _Catalog.body_height(body_id)
+
+	var built := _Builder.spawn(model, body_id, outfit_id, PI, gear)
+	if built.is_empty():
 		return
-	var root := packed.instantiate()
-	if root == null:
-		return
-
-	_apply_skin_texture(root)
-	# FBX often comes in as Root.scale = 100; keep that and only scale the outer wrapper uniformly.
-	var aabb := _combined_aabb(root)
-	var native_h := maxf(aabb.size.y, 0.01)
-	var s := character_height / native_h
-	# Guard: scale must be uniform (same on X/Y/Z).
-	var uniform := Vector3(s, s, s)
-
-	_visual = Node3D.new()
-	_visual.name = "KenneyVisual"
-	_visual.rotation.y = PI
-	_visual.scale = uniform
-	_visual.position = Vector3(0.0, -aabb.position.y * s, 0.0)
-	model.add_child(_visual)
-	_visual.add_child(root)
-
-	_skeleton = _find_skeleton(root)
+	_visual = built.get("visual") as Node3D
+	_anim = built.get("anim") as AnimationPlayer
+	_skeleton = built.get("skeleton") as Skeleton3D
 	if _skeleton != null:
 		for bone_name in ["Head", "Head_end", "Neck"]:
 			var bi := _skeleton.find_bone(bone_name)
 			if bi >= 0:
 				_head_bones.append(bi)
-
-	_anim = AnimationPlayer.new()
-	_anim.name = "AnimationPlayer"
-	root.add_child(_anim)
-	var lib := AnimationLibrary.new()
-	_anim.add_animation_library("", lib)
-
-	_import_anim_clip(lib, "res://assets/kenney_characters/Animations/idle.fbx", "Root|Idle", "idle", true)
-	_import_anim_clip(lib, "res://assets/kenney_characters/Animations/run.fbx", "Root|Run", "run", true)
-	_import_anim_clip(lib, "res://assets/kenney_characters/Animations/jump.fbx", "Root|Jump", "jump", false)
-
 	_play_anim("idle")
 
 
