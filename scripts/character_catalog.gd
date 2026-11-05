@@ -53,7 +53,7 @@ const SLOT_FIT: Dictionary = {
 ## Calibrate this first — reply with final scale/offset/rot_deg when cap looks right:
 ## {"id": "cap", "scale": ?, "offset": Vector3(?, ?, ?), "rot_deg": Vector3(?, ?, ?)}
 const ACCESSORIES: Array[Dictionary] = [
-	{"id": "strawhat", "name": "草帽", "slot": "hat", "file": "strawhat.fbx"},
+	{"id": "strawhat", "name": "草帽", "slot": "hat", "file": "strawhat.fbx", "scale": 0.0065, "offset": Vector3(0.0000, 0.0000, 0.0000), "rot_deg": Vector3(0.0, 0.0, 0.0)},
 	{"id": "cap", "name": "棒球帽", "slot": "hat", "file": "cap.fbx", "scale": 0.004, "offset": Vector3(0.0, 0.0, 0.0), "rot_deg": Vector3(0, 0, 0)},
 	{"id": "farmerCap", "name": "农夫帽", "slot": "hat", "file": "farmerCap.fbx"},
 	{"id": "fantasyCap", "name": "奇幻帽", "slot": "hat", "file": "fantasyCap.fbx"},
@@ -61,7 +61,7 @@ const ACCESSORIES: Array[Dictionary] = [
 	{"id": "militaryHelmet", "name": "军用头盔", "slot": "hat", "file": "militaryHelmet.fbx"},
 	{"id": "racingHelmet", "name": "赛车头盔", "slot": "hat", "file": "racingHelmet.fbx"},
 	{"id": "astroHelmet", "name": "航天头盔", "slot": "hat", "file": "astroHelmet.fbx"},
-	{"id": "glassesRound", "name": "圆框眼镜", "slot": "glasses", "file": "glassesRound.fbx"},
+	{"id": "glassesRound", "name": "圆框眼镜", "slot": "glasses", "file": "glassesRound.fbx", "scale": 0.0040, "offset": Vector3(0.0000, 0.0000, 0.0054), "rot_deg": Vector3(0.0, 0.0, 0.0)},
 	{"id": "glassesRetro", "name": "复古眼镜", "slot": "glasses", "file": "glassesRetro.fbx"},
 	{"id": "hairBobcut", "name": "波波头", "slot": "hair", "file": "hairBobcut.fbx"},
 	{"id": "hairPigtail", "name": "双马尾", "slot": "hair", "file": "hairPigtail.fbx"},
@@ -276,18 +276,51 @@ static func format_accessory_line(acc_id: String, scale: float, offset: Vector3,
 	var acc := find_accessory(acc_id)
 	if acc.is_empty():
 		return ""
+	var bone_part := ""
+	if acc.has("bone"):
+		bone_part = ', "bone": "%s"' % str(acc.get("bone", ""))
 	return (
-		'{"id": "%s", "name": "%s", "slot": "%s", "file": "%s", "scale": %.4f, "offset": Vector3(%.4f, %.4f, %.4f), "rot_deg": Vector3(%.1f, %.1f, %.1f)},'
+		'\t{"id": "%s", "name": "%s", "slot": "%s"%s, "file": "%s", "scale": %.4f, "offset": Vector3(%.4f, %.4f, %.4f), "rot_deg": Vector3(%.1f, %.1f, %.1f)},'
 		% [
 			acc_id,
 			str(acc.get("name", acc_id)),
 			str(acc.get("slot", "")),
+			bone_part,
 			str(acc.get("file", "")),
 			scale,
 			offset.x, offset.y, offset.z,
 			rot_deg.x, rot_deg.y, rot_deg.z,
 		]
 	)
+
+
+static func persist_accessory_fit(acc_id: String, scale: float, offset: Vector3, rot_deg: Vector3) -> String:
+	## Writes the calibrated line into character_catalog.gd. Returns empty on success.
+	var abs_path := ProjectSettings.globalize_path("res://scripts/character_catalog.gd")
+	if not FileAccess.file_exists(abs_path):
+		return "找不到脚本: " + abs_path
+	var rf := FileAccess.open(abs_path, FileAccess.READ)
+	if rf == null:
+		return "无法读取 character_catalog.gd"
+	var text := rf.get_as_text()
+	rf.close()
+	var new_line := format_accessory_line(acc_id, scale, offset, rot_deg)
+	if new_line == "":
+		return "未知配件: " + acc_id
+	var re := RegEx.new()
+	var compile_err := re.compile("\\t\\{\"id\": \"%s\".*\\}," % acc_id)
+	if compile_err != OK:
+		return "正则编译失败"
+	if re.search(text) == null:
+		return "未找到配件定义行: " + acc_id
+	text = re.sub(text, new_line, false)
+	var wf := FileAccess.open(abs_path, FileAccess.WRITE)
+	if wf == null:
+		return "无法写入 character_catalog.gd（是否只读？）"
+	wf.store_string(text)
+	wf.close()
+	set_fit_override(acc_id, scale, offset, rot_deg)
+	return ""
 
 
 static func accessories_in_slot(slot_id: String) -> Array[Dictionary]:

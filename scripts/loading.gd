@@ -1,7 +1,7 @@
 extends Control
 ## Loading bridge into the selected map (forest or placeholder).
 
-const FALLBACK_SCENE := "res://scenes/maps/forest.tscn"
+const FALLBACK_SCENE := "res://scenes/maps/forest_baked.tscn"
 
 
 func _ready() -> void:

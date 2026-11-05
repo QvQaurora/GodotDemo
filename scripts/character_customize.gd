@@ -12,14 +12,13 @@ const Builder = preload("res://scripts/kenney_character_builder.gd")
 @onready var floor_mesh: MeshInstance3D = $Body/PreviewPane/PreviewHost/SubViewport/World/Floor
 @onready var preview_camera: Camera3D = $Body/PreviewPane/PreviewHost/SubViewport/World/Camera3D
 @onready var status_label: Label = $Body/PreviewPane/Status
-@onready var calibrate_box: VBoxContainer = $Body/PreviewPane/Calibrate
-@onready var cal_sliders: VBoxContainer = $Body/PreviewPane/Calibrate/CalSliders
-@onready var cal_copy_btn: Button = $Body/PreviewPane/Calibrate/CalCopy
-@onready var cal_code: LineEdit = $Body/PreviewPane/Calibrate/CalCode
+@onready var calibrate_box: VBoxContainer = $Body/Lists/Calibrate
+@onready var cal_coarse_col: VBoxContainer = $Body/Lists/Calibrate/CalSliders/CoarseCol
+@onready var cal_fine_col: VBoxContainer = $Body/Lists/Calibrate/CalSliders/FineCol
 @onready var hint_label: Label = $Hint
-@onready var body_list: ItemList = $Body/Lists/BodyColumn/BodyList
-@onready var outfit_title: Label = $Body/Lists/OutfitColumn/OutfitTitle
-@onready var mode_tabs: TabContainer = $Body/Lists/OutfitColumn/CatTabs
+@onready var body_list: ItemList = $Body/Lists/ListRow/BodyColumn/BodyList
+@onready var outfit_title: Label = $Body/Lists/ListRow/OutfitColumn/OutfitTitle
+@onready var mode_tabs: TabContainer = $Body/Lists/ListRow/OutfitColumn/CatTabs
 @onready var back_btn: Button = $Buttons/BackButton
 @onready var apply_btn: Button = $Buttons/ApplyButton
 
@@ -46,12 +45,19 @@ var _cal_offset: Vector3 = Vector3.ZERO
 var _cal_rot: Vector3 = Vector3.ZERO
 var _cal_busy: bool = false
 var _slider_scale: HSlider
+var _slider_scale_f: HSlider
 var _slider_ox: HSlider
+var _slider_ox_f: HSlider
 var _slider_oy: HSlider
+var _slider_oy_f: HSlider
 var _slider_oz: HSlider
+var _slider_oz_f: HSlider
 var _slider_rx: HSlider
+var _slider_rx_f: HSlider
 var _slider_ry: HSlider
+var _slider_ry_f: HSlider
 var _slider_rz: HSlider
+var _slider_rz_f: HSlider
 var _label_scale: Label
 var _label_ox: Label
 var _label_oy: Label
@@ -59,6 +65,8 @@ var _label_oz: Label
 var _label_rx: Label
 var _label_ry: Label
 var _label_rz: Label
+var _persist_timer: Timer
+var _persist_dirty: bool = false
 
 
 func _ready() -> void:
@@ -67,11 +75,15 @@ func _ready() -> void:
 	body_list.item_selected.connect(_on_body_selected)
 	preview_host.mouse_filter = Control.MOUSE_FILTER_STOP
 	preview_host.gui_input.connect(_on_preview_gui_input)
-	cal_copy_btn.pressed.connect(_on_copy_cal)
+	_persist_timer = Timer.new()
+	_persist_timer.wait_time = 0.18
+	_persist_timer.one_shot = true
+	_persist_timer.timeout.connect(_flush_cal_persist)
+	add_child(_persist_timer)
 	if hint_label:
-		hint_label.text = "拖拽预览旋转 · 选中配件后可用下方滑条实时标定 · 点「保存外观」保存穿着"
+		hint_label.text = "拖拽预览旋转 · 选中装扮后右侧下方滑条标定（滑动即写入脚本） · 「保存外观」保存穿着"
 	if outfit_title:
-		outfit_title.text = "皮肤与配件"
+		outfit_title.text = "皮肤与装扮"
 	_setup_floor()
 	_build_cal_sliders()
 	_body_id = Catalog.resolve_existing_body_id(GameSettings.player_body_id)
@@ -182,7 +194,7 @@ func _build_mode_tabs() -> void:
 	mode_tabs.add_child(_skin_tabs)
 
 	_gear_tabs = TabContainer.new()
-	_gear_tabs.name = "配件"
+	_gear_tabs.name = "装扮"
 	_gear_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	mode_tabs.add_child(_gear_tabs)
 
@@ -353,56 +365,113 @@ func _active_cal_acc_id() -> String:
 
 
 func _build_cal_sliders() -> void:
-	for child in cal_sliders.get_children():
+	for child in cal_coarse_col.get_children():
 		child.queue_free()
-	_slider_scale = _add_cal_slider("缩放 scale", 0.001, 0.02, 0.0001, 0.004)
-	_label_scale = _slider_scale.get_meta("value_label") as Label
-	_slider_ox = _add_cal_slider("偏移 X", -0.02, 0.02, 0.0001, 0.0)
-	_label_ox = _slider_ox.get_meta("value_label") as Label
-	_slider_oy = _add_cal_slider("偏移 Y 上下", -0.02, 0.02, 0.0001, 0.0)
-	_label_oy = _slider_oy.get_meta("value_label") as Label
-	_slider_oz = _add_cal_slider("偏移 Z 前后", -0.02, 0.02, 0.0001, 0.0)
-	_label_oz = _slider_oz.get_meta("value_label") as Label
-	_slider_rx = _add_cal_slider("旋转 X°", -180.0, 180.0, 1.0, 0.0)
-	_label_rx = _slider_rx.get_meta("value_label") as Label
-	_slider_ry = _add_cal_slider("旋转 Y°", -180.0, 180.0, 1.0, 0.0)
-	_label_ry = _slider_ry.get_meta("value_label") as Label
-	_slider_rz = _add_cal_slider("旋转 Z°", -180.0, 180.0, 1.0, 0.0)
-	_label_rz = _slider_rz.get_meta("value_label") as Label
-	_slider_scale.value_changed.connect(_on_cal_changed)
-	_slider_ox.value_changed.connect(_on_cal_changed)
-	_slider_oy.value_changed.connect(_on_cal_changed)
-	_slider_oz.value_changed.connect(_on_cal_changed)
-	_slider_rx.value_changed.connect(_on_cal_changed)
-	_slider_ry.value_changed.connect(_on_cal_changed)
-	_slider_rz.value_changed.connect(_on_cal_changed)
+	for child in cal_fine_col.get_children():
+		child.queue_free()
+	var pair: Array
+	pair = _add_cal_slider_pair("缩放", 0.001, 0.02, 0.0005, 0.004)
+	_slider_scale = pair[0]
+	_slider_scale_f = pair[1]
+	_label_scale = pair[2]
+	pair = _add_cal_slider_pair("偏移 X", -0.02, 0.02, 0.0005, 0.0)
+	_slider_ox = pair[0]
+	_slider_ox_f = pair[1]
+	_label_ox = pair[2]
+	pair = _add_cal_slider_pair("偏移 Y", -0.02, 0.02, 0.0005, 0.0)
+	_slider_oy = pair[0]
+	_slider_oy_f = pair[1]
+	_label_oy = pair[2]
+	pair = _add_cal_slider_pair("偏移 Z", -0.02, 0.02, 0.0005, 0.0)
+	_slider_oz = pair[0]
+	_slider_oz_f = pair[1]
+	_label_oz = pair[2]
+	pair = _add_cal_slider_pair("旋转 X°", -180.0, 180.0, 5.0, 0.0)
+	_slider_rx = pair[0]
+	_slider_rx_f = pair[1]
+	_label_rx = pair[2]
+	pair = _add_cal_slider_pair("旋转 Y°", -180.0, 180.0, 5.0, 0.0)
+	_slider_ry = pair[0]
+	_slider_ry_f = pair[1]
+	_label_ry = pair[2]
+	pair = _add_cal_slider_pair("旋转 Z°", -180.0, 180.0, 5.0, 0.0)
+	_slider_rz = pair[0]
+	_slider_rz_f = pair[1]
+	_label_rz = pair[2]
+	for s in [
+		_slider_scale, _slider_scale_f,
+		_slider_ox, _slider_ox_f, _slider_oy, _slider_oy_f, _slider_oz, _slider_oz_f,
+		_slider_rx, _slider_rx_f, _slider_ry, _slider_ry_f, _slider_rz, _slider_rz_f,
+	]:
+		(s as HSlider).value_changed.connect(_on_cal_changed)
 
 
-func _add_cal_slider(title: String, min_v: float, max_v: float, step: float, value: float) -> HSlider:
+func _add_cal_slider_pair(title: String, min_v: float, max_v: float, step: float, value: float) -> Array:
+	# Coarse left / fine right (1/10 travel as ±delta).
+	var span := max_v - min_v
+	var fine_half := span / 20.0
+	var fine_step := step / 10.0
+	var coarse := _make_cal_row(title, min_v, max_v, step, value, true)
+	var fine := _make_cal_row(title + " 微调", -fine_half, fine_half, fine_step, 0.0, false)
+	cal_coarse_col.add_child(coarse["row"])
+	cal_fine_col.add_child(fine["row"])
+	return [coarse["slider"], fine["slider"], coarse["label"]]
+
+
+func _make_cal_row(title: String, min_v: float, max_v: float, step: float, value: float, show_value: bool) -> Dictionary:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	var name_l := Label.new()
 	name_l.text = title
-	name_l.custom_minimum_size = Vector2(96, 0)
+	name_l.custom_minimum_size = Vector2(72, 0)
 	name_l.add_theme_font_size_override("font_size", 12)
 	var slider := HSlider.new()
 	slider.min_value = min_v
 	slider.max_value = max_v
 	slider.step = step
 	slider.value = value
+	slider.scrollable = false
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	slider.custom_minimum_size = Vector2(0, 18)
-	var val_l := Label.new()
-	val_l.custom_minimum_size = Vector2(56, 0)
-	val_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	val_l.add_theme_font_size_override("font_size", 12)
-	val_l.text = "%.4f" % value
 	row.add_child(name_l)
 	row.add_child(slider)
-	row.add_child(val_l)
-	cal_sliders.add_child(row)
-	slider.set_meta("value_label", val_l)
-	return slider
+	var val_l: Label = null
+	if show_value:
+		val_l = Label.new()
+		val_l.custom_minimum_size = Vector2(48, 0)
+		val_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		val_l.add_theme_font_size_override("font_size", 12)
+		val_l.text = "%.4f" % value
+		row.add_child(val_l)
+	return {"row": row, "slider": slider, "label": val_l}
+
+
+func _pair_total(coarse: HSlider, fine: HSlider) -> float:
+	return coarse.value + fine.value
+
+
+func _set_pair(coarse: HSlider, fine: HSlider, value: float) -> void:
+	# Prefer putting the value on coarse; leftover (if any) on fine.
+	var c := clampf(value, coarse.min_value, coarse.max_value)
+	if coarse.step > 0.0:
+		c = snappedf(c, coarse.step)
+	coarse.value = c
+	var rem := value - c
+	fine.value = clampf(rem, fine.min_value, fine.max_value)
+
+
+func _read_cal_from_sliders() -> void:
+	_cal_scale = _pair_total(_slider_scale, _slider_scale_f)
+	_cal_offset = Vector3(
+		_pair_total(_slider_ox, _slider_ox_f),
+		_pair_total(_slider_oy, _slider_oy_f),
+		_pair_total(_slider_oz, _slider_oz_f)
+	)
+	_cal_rot = Vector3(
+		_pair_total(_slider_rx, _slider_rx_f),
+		_pair_total(_slider_ry, _slider_ry_f),
+		_pair_total(_slider_rz, _slider_rz_f)
+	)
 
 
 func _sync_calibrate_panel() -> void:
@@ -417,28 +486,39 @@ func _sync_calibrate_panel() -> void:
 	_cal_scale = float(fit.get("scale", Catalog.ACC_BONE_SCALE))
 	_cal_offset = fit.get("offset", Vector3.ZERO) as Vector3
 	_cal_rot = fit.get("rot_deg", Vector3.ZERO) as Vector3
-	_slider_scale.value = _cal_scale
-	_slider_ox.value = _cal_offset.x
-	_slider_oy.value = _cal_offset.y
-	_slider_oz.value = _cal_offset.z
-	_slider_rx.value = _cal_rot.x
-	_slider_ry.value = _cal_rot.y
-	_slider_rz.value = _cal_rot.z
+	_set_pair(_slider_scale, _slider_scale_f, _cal_scale)
+	_set_pair(_slider_ox, _slider_ox_f, _cal_offset.x)
+	_set_pair(_slider_oy, _slider_oy_f, _cal_offset.y)
+	_set_pair(_slider_oz, _slider_oz_f, _cal_offset.z)
+	_set_pair(_slider_rx, _slider_rx_f, _cal_rot.x)
+	_set_pair(_slider_ry, _slider_ry_f, _cal_rot.y)
+	_set_pair(_slider_rz, _slider_rz_f, _cal_rot.z)
 	_update_cal_labels()
-	_update_cal_code()
 	_cal_busy = false
 
 
 func _on_cal_changed(_v: float = 0.0) -> void:
 	if _cal_busy or _cal_acc_id == "":
 		return
-	_cal_scale = _slider_scale.value
-	_cal_offset = Vector3(_slider_ox.value, _slider_oy.value, _slider_oz.value)
-	_cal_rot = Vector3(_slider_rx.value, _slider_ry.value, _slider_rz.value)
+	_read_cal_from_sliders()
 	Catalog.set_fit_override(_cal_acc_id, _cal_scale, _cal_offset, _cal_rot)
 	_update_cal_labels()
-	_update_cal_code()
 	_rebuild_preview(false)
+	_persist_dirty = true
+	_persist_timer.start()
+
+
+func _flush_cal_persist() -> void:
+	if not _persist_dirty or _cal_acc_id == "":
+		return
+	_persist_dirty = false
+	_read_cal_from_sliders()
+	var err := Catalog.persist_accessory_fit(_cal_acc_id, _cal_scale, _cal_offset, _cal_rot)
+	if err != "":
+		status_label.text = "写入失败：" + err
+		return
+	_refresh_status()
+	status_label.text = "%s · 已写入脚本" % status_label.text
 
 
 func _update_cal_labels() -> void:
@@ -446,16 +526,6 @@ func _update_cal_labels() -> void:
 	_label_ox.text = "%.4f" % _cal_offset.x
 	_label_oy.text = "%.4f" % _cal_offset.y
 	_label_oz.text = "%.4f" % _cal_offset.z
-	_label_rx.text = "%.0f" % _cal_rot.x
-	_label_ry.text = "%.0f" % _cal_rot.y
-	_label_rz.text = "%.0f" % _cal_rot.z
-
-
-func _update_cal_code() -> void:
-	cal_code.text = Catalog.format_accessory_line(_cal_acc_id, _cal_scale, _cal_offset, _cal_rot)
-
-
-func _on_copy_cal() -> void:
-	_update_cal_code()
-	DisplayServer.clipboard_set(cal_code.text)
-	status_label.text = "已复制标定代码 · 粘贴替换 character_catalog.gd 里对应行"
+	_label_rx.text = "%.1f" % _cal_rot.x
+	_label_ry.text = "%.1f" % _cal_rot.y
+	_label_rz.text = "%.1f" % _cal_rot.z

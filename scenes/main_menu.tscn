@@ -88,7 +88,7 @@ custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 focus_mode = 2
 theme_override_font_sizes/font_size = 20
-text = "玩家"
+text = "玩家预设"
 
 [node name="SaveButton" type="Button" parent="Center/Panel/Margin/MainButtons"]
 custom_minimum_size = Vector2(0, 48)

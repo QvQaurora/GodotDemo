@@ -29,6 +29,9 @@ var _attack_pressed: bool = false
 var _attack_t: float = -1.0
 var _attack_hit_done: bool = false
 var _attack_cd: float = 0.0
+## Actual wall-clock length used while an attack clip plays (may be sped up).
+var _attack_play_len: float = 0.36
+const ATTACK_TARGET_LEN := 0.95
 var _hurt_cd: float = 0.0
 var _air_height: float = 0.0
 var _air_vel: float = 0.0
@@ -485,26 +488,47 @@ func _process(_delta: float) -> void:
 	# After AnimationPlayer pose update: keep head collapsed in first person.
 	if _cam_mode == CamMode.FIRST:
 		_set_first_person_head_hidden(true)
-	if _attack_t >= 0.0:
+	if _attack_t >= 0.0 and not _has_attack_clip():
 		_apply_attack_arm_pose()
+
+
+func _has_attack_clip() -> bool:
+	return _anim != null and _anim.has_animation("attack")
+
+
+func _attack_duration() -> float:
+	return _attack_play_len
 
 
 func _begin_attack() -> void:
 	## Keep current facing — do not snap the mesh toward the camera.
 	_attack_t = 0.0
 	_attack_hit_done = false
-	_attack_cd = attack_cooldown
+	var speed := 1.0
+	_attack_play_len = 0.36
+	if _has_attack_clip():
+		var raw := maxf(_anim.get_animation("attack").length, 0.2)
+		# Long exports (e.g. timeline end at 250) get sped up so the punch is watchable.
+		if raw > ATTACK_TARGET_LEN:
+			speed = raw / ATTACK_TARGET_LEN
+			_attack_play_len = ATTACK_TARGET_LEN
+		else:
+			_attack_play_len = raw
+		_current_anim = ""
+		_play_anim("attack", speed)
+	_attack_cd = maxf(attack_cooldown, _attack_play_len * 0.85)
 
 
 func _update_attack(delta: float) -> void:
 	if _attack_t < 0.0:
 		return
 	_attack_t += delta
+	var dur := _attack_duration()
 	# Hit frame near the punch apex.
-	if not _attack_hit_done and _attack_t >= 0.14:
+	if not _attack_hit_done and _attack_t >= dur * 0.38:
 		_attack_hit_done = true
 		_deal_attack_hits()
-	if _attack_t >= 0.36:
+	if _attack_t >= dur:
 		_attack_t = -1.0
 
 
@@ -605,6 +629,9 @@ func _face_move_direction(world_dir: Vector3, delta: float) -> void:
 
 func _update_animation(running: bool) -> void:
 	if _anim == null:
+		return
+	# Hold Mixamo/Kenney attack clip until it finishes.
+	if _attack_t >= 0.0 and _current_anim == "attack":
 		return
 	var horiz := Vector3(velocity.x, 0.0, velocity.z).length()
 	var on_floor := _air_height <= 0.001

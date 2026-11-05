@@ -57,6 +57,7 @@ static func spawn(
 	_import_anim_clip(lib, "res://assets/kenney_characters/Animations/idle.fbx", "Root|Idle", "idle", true)
 	_import_anim_clip(lib, "res://assets/kenney_characters/Animations/run.fbx", "Root|Run", "run", true)
 	_import_anim_clip(lib, "res://assets/kenney_characters/Animations/jump.fbx", "Root|Jump", "jump", false)
+	_import_anim_clip(lib, "res://assets/kenney_characters/Animations/attack.fbx", "Scene", "attack", false)
 	if anim.has_animation("idle"):
 		anim.play("idle")
 
@@ -241,6 +242,13 @@ static func _import_anim_clip(lib: AnimationLibrary, res_path: String, src_name:
 				fallback = sn
 			elif sn.ends_with("Jump") and dest_name == "jump":
 				fallback = sn
+			elif dest_name == "attack" and (sn.ends_with("Attack") or sn == "Scene" or sn.to_lower().contains("punch")):
+				fallback = sn
+		if fallback == "":
+			# Last resort for single-clip FBX exports.
+			var all_names := src_ap.get_animation_list()
+			if dest_name == "attack" and all_names.size() == 1:
+				fallback = String(all_names[0])
 		if fallback == "":
 			scene.free()
 			return

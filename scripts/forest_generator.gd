@@ -141,7 +141,8 @@ func _build_world_async() -> void:
 
 
 func _terrain_cache_key() -> String:
-	return "m%d_h%d_r%d" % [mountain_count, int(mountain_height), int(mountain_radius)]
+	# "rm2k" = road mask 2048 (was 4096).
+	return "rm2k_m%d_h%d_r%d" % [mountain_count, int(mountain_height), int(mountain_radius)]
 
 
 func _placement_cache_key() -> String:
@@ -1754,7 +1755,8 @@ func _make_mat(color: Color, roughness: float = 0.85) -> StandardMaterial3D:
 
 func _bake_road_mask() -> ImageTexture:
 	# Distance field to road centerlines. Shader thresholds with fwidth → crisp curb, no mask pixel毛边.
-	var res := 4096
+	# 2048 is enough with fwidth AA; 4096 made the baked .tscn ~64MB of RF image data.
+	var res := 2048
 	var dist_scale := 14.0
 	var buf := PackedFloat32Array()
 	buf.resize(res * res)

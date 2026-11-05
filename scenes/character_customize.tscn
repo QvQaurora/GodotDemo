@@ -10,13 +10,13 @@ script = ExtResource("1_script")
 [node name="Title" type="Label" parent="."]
 layout_mode = 2
 theme_override_font_sizes/font_size = 28
-text = "玩家"
+text = "玩家预设"
 horizontal_alignment = 1
 
 [node name="Hint" type="Label" parent="."]
 layout_mode = 2
 modulate = Color(0.72, 0.82, 0.72, 1)
-text = "在预览区拖拽可旋转查看 · 切换角色/装扮会回到正面 · 选好后点「保存外观」"
+text = "拖拽预览旋转 · 右侧下方可标定装扮（滑动即写入） · 「保存外观」保存穿着"
 horizontal_alignment = 1
 
 [node name="Body" type="HBoxContainer" parent="."]
@@ -74,72 +74,70 @@ text = "标准体型 · 滑板男"
 horizontal_alignment = 1
 autowrap_mode = 3
 
-[node name="Calibrate" type="VBoxContainer" parent="Body/PreviewPane"]
-visible = false
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="CalTitle" type="Label" parent="Body/PreviewPane/Calibrate"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 14
-text = "配件实时标定"
-horizontal_alignment = 1
-
-[node name="CalHint" type="Label" parent="Body/PreviewPane/Calibrate"]
-layout_mode = 2
-modulate = Color(0.7, 0.8, 0.72, 1)
-theme_override_font_sizes/font_size = 12
-text = "拖滑条即时预览 · 点复制可粘贴到 character_catalog.gd"
-autowrap_mode = 3
-
-[node name="CalSliders" type="VBoxContainer" parent="Body/PreviewPane/Calibrate"]
-layout_mode = 2
-theme_override_constants/separation = 2
-
-[node name="CalCopy" type="Button" parent="Body/PreviewPane/Calibrate"]
-custom_minimum_size = Vector2(0, 32)
-layout_mode = 2
-text = "复制标定代码"
-
-[node name="CalCode" type="LineEdit" parent="Body/PreviewPane/Calibrate"]
-layout_mode = 2
-editable = false
-placeholder_text = "标定代码会出现在这里"
-
-[node name="Lists" type="HBoxContainer" parent="Body"]
+[node name="Lists" type="VBoxContainer" parent="Body"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="ListRow" type="HBoxContainer" parent="Body/Lists"]
+layout_mode = 2
+size_flags_vertical = 3
 theme_override_constants/separation = 12
 
-[node name="BodyColumn" type="VBoxContainer" parent="Body/Lists"]
+[node name="BodyColumn" type="VBoxContainer" parent="Body/Lists/ListRow"]
 custom_minimum_size = Vector2(160, 0)
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="BodyTitle" type="Label" parent="Body/Lists/BodyColumn"]
+[node name="BodyTitle" type="Label" parent="Body/Lists/ListRow/BodyColumn"]
 layout_mode = 2
 text = "角色体型"
 
-[node name="BodyList" type="ItemList" parent="Body/Lists/BodyColumn"]
+[node name="BodyList" type="ItemList" parent="Body/Lists/ListRow/BodyColumn"]
 layout_mode = 2
 size_flags_vertical = 3
 allow_reselect = true
 
-[node name="OutfitColumn" type="VBoxContainer" parent="Body/Lists"]
+[node name="OutfitColumn" type="VBoxContainer" parent="Body/Lists/ListRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="OutfitTitle" type="Label" parent="Body/Lists/OutfitColumn"]
+[node name="OutfitTitle" type="Label" parent="Body/Lists/ListRow/OutfitColumn"]
 layout_mode = 2
 text = "装扮皮肤"
 
-[node name="CatTabs" type="TabContainer" parent="Body/Lists/OutfitColumn"]
+[node name="CatTabs" type="TabContainer" parent="Body/Lists/ListRow/OutfitColumn"]
 layout_mode = 2
 size_flags_vertical = 3
+
+[node name="Calibrate" type="VBoxContainer" parent="Body/Lists"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="CalTitle" type="Label" parent="Body/Lists/Calibrate"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "装扮实时标定（滑动即写入脚本）"
+horizontal_alignment = 1
+
+[node name="CalSliders" type="HBoxContainer" parent="Body/Lists/Calibrate"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="CoarseCol" type="VBoxContainer" parent="Body/Lists/Calibrate/CalSliders"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
+
+[node name="FineCol" type="VBoxContainer" parent="Body/Lists/Calibrate/CalSliders"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 2
 
 [node name="Buttons" type="HBoxContainer" parent="."]
 layout_mode = 2
